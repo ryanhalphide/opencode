@@ -300,6 +300,17 @@ export class VoiceTools {
       return { switched_to: model.name, variant: variant ?? "default", session: session.title ?? session.id }
     }
 
+    if (call.name === "switch_agent") {
+      const wanted = args.agent?.trim()
+
+      if (!wanted) throw new Error("agent required")
+      const session = await api.session.get({ sessionID }, options)
+
+      await api.session.switchAgent({ sessionID, agent: wanted }, options)
+
+      return { switched_to: wanted, session: session.title ?? session.id }
+    }
+
     if (call.name === "read_session" || call.name === "wait_for_session") {
       if (call.name === "wait_for_session") {
         await api.experimental.session.wait(

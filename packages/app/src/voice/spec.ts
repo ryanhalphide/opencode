@@ -103,6 +103,16 @@ const definitions = [
     },
     required: ["model"],
   },
+  {
+    name: "switch_agent",
+    description:
+      "Switch the agent a session uses (defaults to the viewed one), for example build, plan or review.",
+    properties: {
+      ...session,
+      agent: { type: "string", description: "The agent's name or id" },
+    },
+    required: ["agent"],
+  },
 ]
 
 export const tools = definitions.map((tool) => ({
