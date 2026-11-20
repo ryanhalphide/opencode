@@ -305,10 +305,26 @@ export class VoiceTools {
 
       if (!wanted) throw new Error("agent required")
       const session = await api.session.get({ sessionID }, options)
+      const catalog = await api.agent.list({ location: { directory: session.location.directory } }, options)
 
-      await api.session.switchAgent({ sessionID, agent: wanted }, options)
+      // The server stores any agent id it is given, so an unknown name would be written to the session and only
+      // fail once the session ran. Resolve it here instead.
+      const agent =
+        catalog.data.find((item) => item.id === wanted) ??
+        catalog.data.find((item) => item.id.toLowerCase() === wanted.toLowerCase()) ??
+        catalog.data.find((item) => item.name.toLowerCase() === wanted.toLowerCase())
 
-      return { switched_to: wanted, session: session.title ?? session.id }
+      if (!agent)
+        return {
+          error: `No agent ${wanted}; switch_agent takes one of ${catalog.data
+            .filter((item) => !item.hidden)
+            .map((item) => item.id)
+            .join(", ")}. The agent did not change.`,
+        }
+
+      await api.session.switchAgent({ sessionID, agent: agent.id }, options)
+
+      return { switched_to: agent.name, session: session.title ?? session.id }
     }
 
     if (call.name === "read_session" || call.name === "wait_for_session") {
