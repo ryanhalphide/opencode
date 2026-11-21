@@ -1,4 +1,4 @@
-import { Show, createMemo, type ComponentProps, type JSX } from "solid-js"
+import { Show, For, createMemo, type ComponentProps, type JSX } from "solid-js"
 import { ProgressCircle } from "@opencode/ui/progress-circle"
 import { Button } from "@opencode/ui/button"
 import { Menu } from "@opencode/ui/menu"
@@ -7,6 +7,7 @@ import { useI18n } from "@opencode/ui/context/i18n"
 import { lastAssistantWithUsage } from "@opencode/client/solid"
 import { usePlugin, type MountedSession } from "@opencode/plugin/gui"
 import { catalogModel, syncCatalog } from "./catalog"
+import { breakdown } from "./breakdown"
 
 export function SessionContextUsage(props: {
   session: MountedSession
@@ -30,6 +31,13 @@ export function SessionContextUsage(props: {
 
   const messages = createMemo(() =>
     props.session.id ? props.session.server.data.session.message.list(props.session.id) : [],
+  )
+
+  // The largest contributors, so hovering the ring says what it is measuring.
+  const largest = createMemo(() => breakdown(messages()).buckets.slice(0, 3))
+
+  const compact = createMemo(
+    () => new Intl.NumberFormat(i18n.locale(), { notation: "compact", maximumFractionDigits: 0 }),
   )
 
   const usd = createMemo(
@@ -154,6 +162,17 @@ export function SessionContextUsage(props: {
           {menuRow(ctx.t("usage.tokens"), context()?.total.toLocaleString(i18n.locale()) ?? "0")}
           <Show when={showCost()}>{menuRow(ctx.t("usage.cost"), cost())}</Show>
           {menuRow(ctx.t("usage.usage"), `${context()?.usage ?? 0}%`)}
+          <Show when={largest().length}>
+            <Menu.Separator />
+            <For each={largest()}>
+              {(bucket) =>
+                menuRow(
+                  ctx.t(`breakdown.${bucket.source}`),
+                  compact().format(bucket.tokens).toLocaleLowerCase(i18n.locale()),
+                )
+              }
+            </For>
+          </Show>
           <Menu.Separator />
           <Menu.Item onSelect={viewContext}>{ctx.t("usage.view")}</Menu.Item>
         </Menu.Content>

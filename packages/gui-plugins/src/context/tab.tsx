@@ -15,6 +15,7 @@ import type { SessionMessageInfo } from "@opencode/client/promise"
 import { lastAssistantWithUsage } from "@opencode/client/solid"
 import { createKeyed, usePlugin, type MountedSession } from "@opencode/plugin/gui"
 import { catalogModel, syncCatalog } from "./catalog"
+import { breakdown, messageTokens, type ContextSource } from "./breakdown"
 import { fetchSessionExport, sessionExportFilename } from "./export"
 import { createSessionContextFormatter } from "./format"
 import {
@@ -58,6 +59,8 @@ function RawMessage(props: {
   message: SessionMessageInfo
   onRendered: () => void
   time: (value: number | undefined) => string
+  /** Preformatted estimate, so this row never re-derives it. */
+  tokens: string
 }) {
   return (
     <Accordion.Item value={props.message.id}>
@@ -68,6 +71,7 @@ function RawMessage(props: {
               {props.message.type} <span class="text-text-base">• {props.message.id}</span>
             </div>
             <div class="flex items-center gap-3">
+              <div class="shrink-0 text-12-regular tabular-nums text-text-weak">{props.tokens}</div>
               <div class="shrink-0 text-12-regular text-text-weak">{props.time(props.message.time.created)}</div>
               <Icon name="chevron-grabber-vertical" class="shrink-0 text-text-weak" />
             </div>
@@ -142,6 +146,45 @@ export default function SessionContextTab(props: { session: MountedSession }) {
   })
 
   const formatter = createMemo(() => createSessionContextFormatter(i18n.locale()))
+
+  // What is filling the window, by source, derived from the same list the stats read.
+  const sources = createMemo(() => breakdown(messages()))
+
+  // Picking a source narrows the raw-message list to the messages that contributed to it.
+  const [source, setSource] = createSignal<ContextSource>()
+
+  const shownMessages = createMemo(() => {
+    const picked = source()
+
+    if (!picked) return messages()
+
+    const ids = new Set(sources().buckets.find((bucket) => bucket.source === picked)?.messages ?? [])
+
+    return messages().filter((message) => ids.has(message.id))
+  })
+
+  // Widths follow the measured percentage so the bar agrees with the header ring; the split inside it is estimated.
+  const share = (tokens: number) => {
+    const estimated = sources().estimated
+    const usage = context()?.usage
+
+    if (!estimated || usage === undefined || usage === null) return 0
+
+    return (tokens / estimated) * usage
+  }
+
+  const percentOfWindow = (tokens: number) => {
+    const limit = context()?.limit
+
+    if (!limit) return null
+
+    return Math.round((tokens / limit) * 100)
+  }
+
+  /** Opacity step that separates one source's segment from the next without inventing theme colors. */
+  const tone = (index: number) => `${1 - Math.min(index, 7) * 0.1}`
+
+  const messageTokensLabel = (tokens: number) => `≈ ${formatter().number(tokens)}`
 
   const cost = createMemo(() => {
     if (!props.session.id) return
@@ -405,6 +448,76 @@ export default function SessionContextTab(props: { session: MountedSession }) {
       }
     >
       <div data-slot="session-usage-content" class="px-4 pt-4 pb-6 flex flex-col gap-6 md:px-6 md:pb-10 md:gap-10">
+        <Show when={sources().buckets.length}>
+          <div class="flex flex-col gap-3" data-slot="context-breakdown">
+            <div class="flex items-baseline justify-between gap-2">
+              <div class="text-12-regular text-text-weak">{ctx.t("breakdown.title")}</div>
+              <div class="shrink-0 text-12-regular tabular-nums text-text-weak">
+                {`${formatter().number(context()?.total)} / ${formatter().number(context()?.limit)}`}
+              </div>
+            </div>
+
+            <div
+              class="flex h-2 w-full gap-px overflow-hidden rounded-full bg-v2-background-bg-layer-04"
+              role="img"
+              aria-label={`${ctx.t("breakdown.title")} ${formatter().percent(context()?.usage)}`}
+            >
+              <For each={sources().buckets}>
+                {(bucket, index) => (
+                  <div
+                    class="h-full transition-[width] duration-300"
+                    style={{
+                      width: `${share(bucket.tokens)}%`,
+                      background: "var(--v2-icon-icon-base)",
+                      opacity: tone(index()),
+                    }}
+                    title={`${ctx.t(`breakdown.${bucket.source}`)} · ${formatter().number(bucket.tokens)}`}
+                  />
+                )}
+              </For>
+            </div>
+
+            <div class="flex flex-col">
+              <For each={sources().buckets}>
+                {(bucket, index) => (
+                  <button
+                    type="button"
+                    aria-pressed={source() === bucket.source}
+                    class={`group flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-12-regular ${
+                      source() === bucket.source ? "bg-v2-background-bg-layer-04" : "hover:bg-v2-background-bg-layer-04"
+                    }`}
+                    onClick={() => setSource(source() === bucket.source ? undefined : bucket.source)}
+                  >
+                    <span
+                      class="size-2 shrink-0 rounded-full"
+                      style={{ background: "var(--v2-icon-icon-base)", opacity: tone(index()) }}
+                    />
+                    <span
+                      class={`truncate ${source() === bucket.source ? "text-text-strong" : "text-text-weak"}`}
+                    >
+                      {ctx.t(`breakdown.${bucket.source}`)}
+                    </span>
+                    <span class="ml-auto shrink-0 tabular-nums text-text-strong">
+                      {formatter().number(bucket.tokens)}
+                    </span>
+                    <span class="w-10 shrink-0 text-right tabular-nums text-text-weak">
+                      {formatter().percent(percentOfWindow(bucket.tokens))}
+                    </span>
+                    <Icon
+                      name="chevron-down"
+                      class={`size-3 shrink-0 text-text-weak transition-transform ${
+                        source() === bucket.source ? "rotate-180" : ""
+                      }`}
+                    />
+                  </button>
+                )}
+              </For>
+            </div>
+
+            <div class="text-12-regular text-text-weak">{ctx.t("breakdown.estimated")}</div>
+          </div>
+        </Show>
+
         <div class="grid grid-cols-1 @[32rem]:grid-cols-2 gap-4">
           <For each={stats}>
             {(stat) => <Show when={stat.value()}>{(value) => <Stat label={ctx.t(stat.label)} value={value()} />}</Show>}
@@ -424,7 +537,21 @@ export default function SessionContextTab(props: { session: MountedSession }) {
 
         <div class="flex flex-col gap-2">
           <div class="flex items-center justify-between">
-            <div class="text-12-regular text-text-weak">{ctx.t("rawMessages.title")}</div>
+            <div class="flex min-w-0 items-center gap-2">
+              <div class="shrink-0 text-12-regular text-text-weak">{ctx.t("rawMessages.title")}</div>
+              <Show when={source()}>
+                <button
+                  type="button"
+                  class="min-w-0 truncate text-12-regular text-text-weak underline-offset-2 hover:text-text-strong hover:underline"
+                  onClick={() => setSource(undefined)}
+                >
+                  {`${ctx.t("breakdown.showing", {
+                    shown: String(shownMessages().length),
+                    total: String(messages().length),
+                  })} · ${ctx.t("breakdown.clear")}`}
+                </button>
+              </Show>
+            </div>
             <Button
               size="small"
               variant="ghost"
@@ -439,9 +566,14 @@ export default function SessionContextTab(props: { session: MountedSession }) {
             </Button>
           </div>
           <Accordion multiple>
-            <For each={messages()}>
+            <For each={shownMessages()}>
               {(message) => (
-                <RawMessage message={message} onRendered={() => dispatchScroll(contentChanged)} time={formatter().time} />
+                <RawMessage
+                  message={message}
+                  onRendered={() => dispatchScroll(contentChanged)}
+                  time={formatter().time}
+                  tokens={messageTokensLabel(messageTokens(message))}
+                />
               )}
             </For>
           </Accordion>
