@@ -14,6 +14,8 @@ import { usePlatform } from "@/runtime/platform/platform"
 import { Persist, persisted } from "@/runtime/persistence/storage"
 import { Persistence } from "@/runtime/persistence/schema"
 import en from "@/runtime/i18n/en"
+import { useCommand } from "@/shell/commands/command"
+import { registerVoiceCallCommand } from "./command"
 import { useVoice } from "./context"
 import {
   canGrabVoicePanel,
@@ -54,6 +56,19 @@ export function VoiceComposer(props: ParentProps<{ session: SessionInfo | undefi
 
   const enabled = () =>
     platform.platform === "desktop" && import.meta.env.VITE_OPENCODE_CHANNEL !== "prod" && state.enabled
+
+  // The palette command starts the same call as the button and is listed only while that button would show.
+  const command = useCommand()
+
+  registerVoiceCallCommand(command, {
+    available: () => enabled() && !!props.session && voice.view().canStart,
+    title: language.t("voice.call"),
+    start: () => {
+      const session = props.session
+
+      if (session) voice.start(server.key, server.ctx, session)
+    },
+  })
 
   createEffect(() => {
     const session = props.session
