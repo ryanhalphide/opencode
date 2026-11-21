@@ -4,10 +4,10 @@ import { Button } from "@opencode/ui/button"
 import { Menu } from "@opencode/ui/menu"
 import { Tooltip } from "@opencode/ui/tooltip"
 import { useI18n } from "@opencode/ui/context/i18n"
-import { lastAssistantWithUsage } from "@opencode/client/solid"
 import { usePlugin, type MountedSession } from "@opencode/plugin/gui"
 import { catalogModel, syncCatalog } from "./catalog"
 import { breakdown } from "./breakdown"
+import { contextSize } from "./context-size"
 
 export function SessionContextUsage(props: {
   session: MountedSession
@@ -52,23 +52,18 @@ export function SessionContextUsage(props: {
     props.session.id ? props.session.server.data.session.get(props.session.id) : undefined,
   )
 
-  // Same step as the TUI: after the last completed compaction and before an undo boundary.
+  // A measured step wins; between a completed compaction and the next step the window is estimated
+  // from what the compaction kept, so the header reflects the reduction instead of dropping to zero.
   const context = createMemo(() => {
-    const message = lastAssistantWithUsage(messages(), info()?.revert?.messageID)
+    const size = contextSize(messages(), info()?.revert?.messageID)
+    if (!size) return
 
-    if (!message) return
-    const model = catalogModel(props.session, message.model)?.model
-
-    const total =
-      message.tokens.input +
-      message.tokens.output +
-      message.tokens.reasoning +
-      message.tokens.cache.read +
-      message.tokens.cache.write
+    const ref = size.measured ? size.model : info()?.model
+    const model = ref ? catalogModel(props.session, ref)?.model : undefined
 
     return {
-      total,
-      usage: model?.limit.context ? Math.round((total / model.limit.context) * 100) : null,
+      total: size.total,
+      usage: model?.limit.context ? Math.round((size.total / model.limit.context) * 100) : null,
     }
   })
 
