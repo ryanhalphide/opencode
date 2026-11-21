@@ -56,6 +56,8 @@ export const decodeArguments = Schema.decodeUnknownSync(
       model: Schema.optional(Schema.String),
       variant: Schema.optional(Schema.String),
       agent: Schema.optional(Schema.String),
+      request_id: Schema.optional(Schema.String),
+      decision: Schema.optional(Schema.Literals(["approve", "always", "deny"])),
     }),
   ),
 )

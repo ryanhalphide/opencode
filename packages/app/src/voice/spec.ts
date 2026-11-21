@@ -113,6 +113,30 @@ const definitions = [
     },
     required: ["agent"],
   },
+  {
+    name: "list_permissions",
+    description: "What a session is waiting to be allowed or denied, with an id and a short summary.",
+    properties: session,
+    required: [],
+  },
+  {
+    name: "answer_permission",
+    description:
+      "Approve or deny a pending permission request in a session. Use always to allow every request that matches it from now on.",
+    properties: {
+      ...session,
+      request_id: {
+        type: "string",
+        description: "A pending id from list_permissions; omit when only one is pending",
+      },
+      decision: {
+        type: "string",
+        enum: ["approve", "always", "deny"],
+        description: "approve once, always approve matching requests, or deny",
+      },
+    },
+    required: ["decision"],
+  },
 ]
 
 export const tools = definitions.map((tool) => ({

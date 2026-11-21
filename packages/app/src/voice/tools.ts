@@ -1,4 +1,4 @@
-import type { SessionInfo, SessionMessageInfo } from "@opencode/client/promise"
+import type { PermissionRequest, SessionInfo, SessionMessageInfo } from "@opencode/client/promise"
 import { SessionMessage } from "@opencode/schema/session-message"
 import type { ServerCtx } from "@/runtime/server/runtime"
 import { decodeArguments, type ToolCall } from "./protocol"
@@ -9,6 +9,16 @@ import { formatHandoff, headerLapse } from "./handoff"
 import { folder, matchModels, SessionSearch } from "./search"
 
 type Request = { id: string; sessionID: string; transcript: string[] }
+
+/** A spoken decision mapped to the protocol's reply. */
+const answers = { approve: "once", always: "always", deny: "reject" } as const
+
+/** One speakable line for a request: what it says, then what it touches. */
+function spokenPermission(request: PermissionRequest) {
+  const line = [request.message, ...request.resources].filter((part): part is string => !!part).join("; ")
+
+  return line.length > 200 ? `${line.slice(0, 197)}...` : line
+}
 
 export class VoiceTools {
   readonly replies = new ReplyWatch()
@@ -325,6 +335,52 @@ export class VoiceTools {
       await api.session.switchAgent({ sessionID, agent: agent.id }, options)
 
       return { switched_to: agent.name, session: session.title ?? session.id }
+    }
+
+    if (call.name === "list_permissions") {
+      const [session, pending] = await Promise.all([
+        api.session.get({ sessionID }, options),
+        api.permission.list({ sessionID }, options),
+      ])
+
+      return {
+        session: session.title ?? session.id,
+        pending: pending.map((request) => ({
+          id: request.id,
+          action: request.action,
+          summary: spokenPermission(request),
+        })),
+      }
+    }
+
+    if (call.name === "answer_permission") {
+      if (!args.decision) throw new Error("decision required")
+      const decision = answers[args.decision]
+
+      const [session, pending] = await Promise.all([
+        api.session.get({ sessionID }, options),
+        api.permission.list({ sessionID }, options),
+      ])
+
+      // "Approve that" names no id; it can still be answered when exactly one request waits.
+      const request = args.request_id
+        ? pending.find((item) => item.id === args.request_id)
+        : pending.length === 1
+          ? pending[0]
+          : undefined
+
+      if (!request)
+        return {
+          error: args.request_id
+            ? "No pending permission has that id; it may already be answered. Nothing changed."
+            : pending.length
+              ? `${pending.length} permissions are pending; pass one id from list_permissions. Nothing changed.`
+              : "Nothing is waiting for permission in that session.",
+        }
+
+      await api.permission.reply({ sessionID, requestID: request.id, decision }, options)
+
+      return { answered: decision, action: request.action, session: session.title ?? session.id }
     }
 
     if (call.name === "read_session" || call.name === "wait_for_session") {
