@@ -71,7 +71,7 @@ export const generate = Effect.fn("SessionGenerate.generate")(function* (input: 
       modelID: model.ref.id,
     })
     const response = yield* llm.generate(prepared.request, prepared.options).pipe(ModelRetry.retry)
-    const usage = SessionUsage.record(response.usage, model.cost)
+    const usage = SessionUsage.record(response.usage, model.cost, model.costMultipliers)
     yield* bus.publish(SessionEvent.UsageRecorded, { sessionID: selection.session.id, source: "generate", ...usage })
     return { text: response.text, ...usage }
   }).pipe(instances.provide(input.session))

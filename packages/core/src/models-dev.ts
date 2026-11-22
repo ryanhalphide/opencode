@@ -463,6 +463,8 @@ function modelInfo(
       tier: item.tier && { ...item.tier },
       cache: { ...item.cache },
     })),
+    // The catalog's peak windows, so estimated cost can follow a provider's time pricing.
+    costMultipliers: model.cost?.multipliers ?? [],
     status: Option.getOrElse(decodeStatus(model.status), () => "active" as const),
     enabled: true,
     limit: { context: model.limit?.context ?? 0, input: model.limit?.input, output: model.limit?.output ?? 0 },

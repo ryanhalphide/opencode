@@ -127,6 +127,8 @@ export interface Resolved {
   readonly capabilities: Capabilities
   /** Catalog pricing in dollars per million tokens. */
   readonly cost: Info["cost"]
+  /** Catalog time multipliers, so estimated cost can follow a provider's peak pricing. */
+  readonly costMultipliers?: Info["costMultipliers"]
   /** Catalog token limits used by Core for context management. */
   readonly limit: Info["limit"]
   /** Model policy overrides the provider policy; omitted means summary compaction. */
@@ -512,6 +514,7 @@ export const layer = Layer.effect(
         }),
         capabilities: selected.capabilities,
         cost: selected.cost,
+        costMultipliers: selected.costMultipliers,
         limit: selected.limit,
         compaction: runtimeInfo.settings?.compaction,
         cache: runtimeInfo.settings?.cache,

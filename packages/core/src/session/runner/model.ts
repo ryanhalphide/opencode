@@ -33,7 +33,10 @@ export class ModelUnavailableError extends Schema.TaggedError<ModelUnavailableEr
   }
 }
 export type Error = ModelNotSelectedError | ModelUnavailableError | ModelResolver.Error
-export type Resolved = ModelResolver.Resolved
+export type Resolved = ModelResolver.Resolved & {
+  /** Catalog time multipliers, so estimated cost can follow a provider's peak pricing. */
+  readonly costMultipliers?: Model.Info["costMultipliers"]
+}
 
 export interface Interface {
   /** Availability is sampled lazily for each explicitly selected model resolution. */
@@ -53,6 +56,7 @@ export const resolved = (
     readonly capabilities: Model.Capabilities
     readonly variant?: Model.VariantID
     readonly cost: Model.Info["cost"]
+    readonly costMultipliers?: Model.Info["costMultipliers"]
     readonly limit: Model.Info["limit"]
     readonly compaction?: Provider.Compaction
     readonly transport?: Provider.Transport
@@ -66,6 +70,7 @@ export const resolved = (
   }),
   capabilities: options.capabilities,
   cost: options.cost,
+  costMultipliers: options.costMultipliers,
   limit: options.limit,
   compaction: options.compaction,
   transport: options.transport,

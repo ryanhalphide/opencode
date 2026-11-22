@@ -298,7 +298,9 @@ export const make = Effect.gen(function* () {
                     .files({ from: startSnapshot, to: snapshot })
                     .pipe(Effect.orElseSucceed(() => undefined))
               : undefined
-          const usage = record.finish ? SessionUsage.record(record.finish.usage, input.model.cost) : undefined
+          const usage = record.finish
+            ? SessionUsage.record(record.finish.usage, input.model.cost, input.model.costMultipliers)
+            : undefined
           if (usage) yield* Effect.annotateCurrentSpan("opencode.usage.cost_usd", usage.cost)
           if (record.failure) yield* publisher.publishStepFailure({ ...usage, snapshot, files })
           if (record.finish && usage && !record.failure)

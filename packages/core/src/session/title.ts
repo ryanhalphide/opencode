@@ -90,7 +90,7 @@ export const layer = Layer.effect(
           }
           if (LLMEvent.is.textDelta(event)) chunks.push({ id: event.id, text: event.text })
           if (LLMEvent.is.stepFinish(event)) {
-            const step = SessionUsage.record(event.usage, input.model.cost)
+            const step = SessionUsage.record(event.usage, input.model.cost, input.model.costMultipliers)
             usage = usage ? SessionUsage.add(usage, step) : step
           }
           return Effect.void

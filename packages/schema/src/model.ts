@@ -131,6 +131,10 @@ export const Info = Schema.Struct({
     released: Schema.Finite,
   }),
   cost: Schema.Array(Cost),
+  /** Catalog time multipliers (peak windows); the estimated cost path applies them, a reported cost wins. */
+  costMultipliers: Schema.Array(
+    Schema.Struct({ when: Schema.Record(Schema.String, Schema.Any), factor: Schema.Any }),
+  ).pipe(optional),
   status: Schema.Literals(["alpha", "beta", "deprecated", "active"]),
   enabled: Schema.Boolean,
   limit: Schema.Struct({
@@ -152,6 +156,7 @@ export const Info = Schema.Struct({
           variants: [],
           time: { released: 0 },
           cost: [],
+          costMultipliers: [],
           status: "active",
           enabled: true,
           limit: { context: 200_000, output: 32_000 },

@@ -564,7 +564,10 @@ export const layer = Layer.effect(
       const prepared = yield* prepare(context, context.messages, budget, "session")
 
       const toResult = (window: ReadonlyArray<Message>, usage: Usage | undefined) =>
-        spend(context.session.id, usage && SessionUsage.record(usage, context.model.cost)).pipe(
+        spend(
+          context.session.id,
+          usage && SessionUsage.record(usage, context.model.cost, context.model.costMultipliers),
+        ).pipe(
           Effect.as<Result>({
             text: "",
             // Plain JSON, not the schema encoder: provider metadata can hold undefined entries, which it rejects.
@@ -797,9 +800,11 @@ export const layer = Layer.effect(
             }
 
             if (LLMEvent.is.stepFinish(event)) {
-              return spend(sessionID, SessionUsage.record(event.usage, context.model.cost), background?.usage).pipe(
-                Effect.as(streamed),
-              )
+              return spend(
+                sessionID,
+                SessionUsage.record(event.usage, context.model.cost, context.model.costMultipliers),
+                background?.usage,
+              ).pipe(Effect.as(streamed))
             }
 
             if (!LLMEvent.is.finish(event)) return Effect.succeed(streamed)
@@ -863,7 +868,7 @@ export const layer = Layer.effect(
     const fromHook = (context: SessionContext.Loaded, supplied: SessionCompactionResult, background?: Background) => {
       const usage = supplied.tokens && {
         tokens: supplied.tokens,
-        cost: SessionUsage.calculateCost(context.model.cost, supplied.tokens),
+        cost: SessionUsage.calculateCost(context.model.cost, supplied.tokens, context.model.costMultipliers),
       }
       return spend(context.session.id, usage, background?.usage).pipe(
         Effect.as<Result>({
