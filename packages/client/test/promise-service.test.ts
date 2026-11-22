@@ -1,8 +1,11 @@
 import { expect, test } from "bun:test"
+import { join } from "node:path"
 import { Service, type EnsureReason } from "../src/promise/service"
 import {
   catchesSigterm,
+  deadPid,
   expectNotListening,
+  freeUrl,
   serviceFixture,
   stopSignal,
   stoppedExitCode,
@@ -56,6 +59,49 @@ test("ensures a missing service with native promises", async () => {
 
   expect(endpoint.url).toBe(info.url)
   expect(starts).toEqual(["missing"])
+})
+
+test("removes a registration naming a dead process before recruiting a replacement", async () => {
+  await using fixture = await serviceFixture()
+  const registration = fixture.registration
+  await Bun.write(
+    registration,
+    JSON.stringify({ id: crypto.randomUUID(), version: "test", url: freeUrl(), pid: await deadPid(), password: "private" }),
+  )
+  const observed = registration + ".present"
+  const started = Date.now()
+
+  const error = await ensure({
+    file: registration,
+    version: "test",
+    command: [process.execPath, join(import.meta.dir, "fixture/inspect-registration.ts"), registration, observed],
+  }).catch((cause: unknown) => cause)
+
+  // The stale registration is removed before the first contender starts, so no contender inherits it.
+  expect(await Bun.file(observed).text()).toBe("false")
+  expect(error).toBeInstanceOf(Error)
+  if (!(error instanceof Error)) throw error
+  expect(error.message).toContain("Server process exited with code 1")
+  expect(Date.now() - started).toBeLessThan(3_000)
+})
+
+test("reuses a live registered service and leaves its registration alone", async () => {
+  await using fixture = await serviceFixture()
+  const registration = fixture.registration
+  const existing = fixture.spawn("graceful")
+  await fixture.waitForFile()
+  const observed = registration + ".present"
+
+  const endpoint = await ensure({
+    file: registration,
+    version: "test",
+    command: [process.execPath, join(import.meta.dir, "fixture/inspect-registration.ts"), registration, observed],
+  })
+  const info = await Bun.file(registration).json()
+
+  expect(endpoint.url).toBe(info.url)
+  expect(info.pid).toBe(existing.pid)
+  expect(await Bun.file(observed).exists()).toBe(false)
 })
 
 test("adds configured environment variables with native promises", async () => {

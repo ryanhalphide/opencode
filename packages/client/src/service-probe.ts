@@ -45,8 +45,45 @@ export function same(left: Info, right: Info) {
   return left.id === right.id && left.version === right.version && left.url === right.url && left.pid === right.pid
 }
 
+/**
+ * The outcome of asking a registered owner for its health.
+ *
+ * `stale` is separate from `timedOut` on purpose: an unreachable owner is not necessarily dead, and
+ * an owner that is provably dead must not be waited on. Only `stale` permits immediate recovery.
+ */
+export type ProbeOutcome = {
+  readonly service: LocalService | undefined
+  readonly timedOut: boolean
+  /** The registration names a process that no longer exists, so it can be cleaned up immediately. */
+  readonly stale?: true
+}
+
+/**
+ * Whether a recorded service process still exists.
+ *
+ * `kill(pid, 0)` performs the permission check without delivering a signal: ESRCH proves the process
+ * is gone, EPERM proves it exists but belongs to another user, and any other error is treated as
+ * alive so a registration is never discarded on an inconclusive answer.
+ */
+export function alive(pid: number) {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (cause) {
+    return !(cause instanceof Error && "code" in cause && cause.code === "ESRCH")
+  }
+}
+
+/** `stale` when the recorded process is provably gone, so callers can spread it into a probe outcome. */
+function dead(info: Info): Pick<ProbeOutcome, "stale"> {
+  return alive(info.pid) ? {} : { stale: true }
+}
+
 /** Ask a registered owner for its health and classify the answer. */
-export async function probeResult(info: Info, timeout = defaultEnsureTiming.requestTimeout) {
+export async function probeResult(
+  info: Info,
+  timeout = defaultEnsureTiming.requestTimeout,
+): Promise<ProbeOutcome> {
   const endpoint = {
     url: info.url,
     auth: info.password === undefined ? undefined : { type: "basic", username: "opencode", password: info.password },
@@ -58,7 +95,7 @@ export async function probeResult(info: Info, timeout = defaultEnsureTiming.requ
       body: response.status === 404 ? undefined : ((await response.json()) as unknown),
     }))
     .catch(() => undefined)
-  if (result === undefined) return { service: undefined, timedOut: signal.aborted }
+  if (result === undefined) return { service: undefined, timedOut: signal.aborted, ...dead(info) }
   const response = result.response
   // A missing health endpoint identifies protocol incompatibility, not an older
   // version. Only an unmet version requirement lets ensure replace this owner.
@@ -75,8 +112,11 @@ export async function probeResult(info: Info, timeout = defaultEnsureTiming.requ
     }
   const serverInfo = decodeInfo(result.body)
   if (serverInfo === undefined) return { service: undefined, timedOut: false }
-  if (serverInfo.pid !== info.pid) return { service: undefined, timedOut: false }
-  if (info.version !== undefined && serverInfo.version !== info.version) return { service: undefined, timedOut: false }
+  // A mismatched answer means the registration no longer describes the owner that replied, so the
+  // record is useless either way. Only a provably dead pid may be cleaned up without waiting.
+  if (serverInfo.pid !== info.pid) return { service: undefined, timedOut: false, ...dead(info) }
+  if (info.version !== undefined && serverInfo.version !== info.version)
+    return { service: undefined, timedOut: false, ...dead(info) }
   return {
     service: {
       info,

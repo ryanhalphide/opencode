@@ -4,7 +4,7 @@ import { contenderPool, spawnServiceContender } from "../service-contender.js"
 import { defaultEnsureTiming, ensureTiming, type EnsureTiming } from "../service-timing.js"
 import { matchesVersion } from "../service-version.js"
 import { PtyHandoff } from "../pty-handoff.js"
-import { decide, fallback, headers, probeResult, same } from "../service-probe.js"
+import { alive, decide, fallback, headers, probeResult, same } from "../service-probe.js"
 
 export * from "../service.js"
 export { fallback, headers }
@@ -52,6 +52,20 @@ export async function ensure(options: EnsureOptions = {}): Promise<Endpoint> {
       if (Date.now() >= deadline)
         throw pool.failure() ?? new Error("Timed out waiting for the background service to start")
       const registration = await registered(options.file, timing.requestTimeout)
+      // A registration whose process is provably gone is never recoverable by waiting. Clean it up
+      // on the first observation rather than spending the grace period on a dead pid, then let the
+      // next iteration recruit a fresh service with no registration present.
+      if (registration.stale && registration.info !== undefined) {
+        const info = registration.info
+        announce("missing")
+        console.warn("Background service process is gone; removing its stale registration")
+        await PtyHandoff.clear(options.file ?? fallback())
+        await terminate(info, options, timing)
+        pool.evict(info.pid)
+        pool.recruitNow()
+        timeouts = undefined
+        continue
+      }
       if (registration.timedOut && registration.info !== undefined) {
         timeouts = {
           info: registration.info,
@@ -123,7 +137,7 @@ async function read(file?: string) {
 
 async function registered(file?: string, timeout?: number) {
   const info = await read(file)
-  if (info === undefined) return { info: undefined, service: undefined, timedOut: false }
+  if (info === undefined) return { info: undefined, service: undefined, timedOut: false, stale: undefined }
   return { info, ...(await probeResult(info, timeout)) }
 }
 
@@ -153,12 +167,16 @@ async function waitUntilStopped(pid: number, timing: EnsureTiming) {
 async function terminate(info: Info, options: { readonly file?: string }, timing: EnsureTiming) {
   const current = await read(options.file)
   if (current === undefined || !same(current, info)) return
-  signal(info.pid, "SIGTERM")
-  // The registration can disappear or change hands before this process exits. Only the PID we
-  // signalled can tell us whether it has stopped, so escalate based on that process.
-  if (!(await waitUntilStopped(info.pid, timing))) {
-    signal(info.pid, "SIGKILL")
-    if (!(await waitUntilStopped(info.pid, timing))) throw new Error(`Server process ${info.pid} is still running`)
+  // A dead pid is already stopped: signalling it would either fail or, if the pid has been reused,
+  // hit an unrelated process. Only a live registration is escalated.
+  if (alive(info.pid)) {
+    signal(info.pid, "SIGTERM")
+    // The registration can disappear or change hands before this process exits. Only the PID we
+    // signalled can tell us whether it has stopped, so escalate based on that process.
+    if (!(await waitUntilStopped(info.pid, timing))) {
+      signal(info.pid, "SIGKILL")
+      if (!(await waitUntilStopped(info.pid, timing))) throw new Error(`Server process ${info.pid} is still running`)
+    }
   }
   const latest = await read(options.file)
   if (latest === undefined || !same(latest, info)) return

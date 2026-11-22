@@ -4,7 +4,7 @@ import { contenderPool, spawnServiceContender } from "../service-contender.js"
 import { defaultEnsureTiming, ensureTiming, type EnsureTiming } from "../service-timing.js"
 import { matchesVersion } from "../service-version.js"
 import { PtyHandoff } from "../pty-handoff.js"
-import { decide, fallback, headers, probeResult, same } from "../service-probe.js"
+import { alive, decide, fallback, headers, probeResult, same } from "../service-probe.js"
 
 export * from "../service.js"
 export { headers }
@@ -72,6 +72,18 @@ export const ensure = Effect.fn("service.ensure")(function* (options: EnsureOpti
     const registration = yield* registered(options.file, timing.requestTimeout)
     const info = registration.info
     const service = registration.service
+    // A registration whose process is provably gone is never recoverable by waiting. Clean it up on
+    // the first observation and end this iteration so the next one recruits with no registration.
+    if (registration.stale && info !== undefined) {
+      yield* announce("missing")
+      yield* Effect.logWarning("Background service process is gone; removing its stale registration")
+      yield* Effect.tryPromise(() => PtyHandoff.clear(options.file ?? fallback()))
+      yield* terminate(info, options, timing)
+      pool.evict(info.pid)
+      pool.recruitNow()
+      timeouts = undefined
+      return Option.none()
+    }
     if (registration.timedOut && info !== undefined) {
       timeouts = {
         info,
@@ -159,7 +171,7 @@ const read = Effect.fnUntraced(function* (file?: string) {
 
 const registered = Effect.fnUntraced(function* (file?: string, timeout?: number) {
   const info = yield* read(file)
-  if (info === undefined) return { info: undefined, service: undefined, timedOut: false }
+  if (info === undefined) return { info: undefined, service: undefined, timedOut: false, stale: undefined }
   return { info, ...(yield* Effect.promise(() => probeResult(info, timeout))) }
 })
 
@@ -182,13 +194,17 @@ const stopped = Effect.fnUntraced(function* (pid: number) {
 const terminate = Effect.fnUntraced(function* (info: Info, options: { readonly file?: string }, timing: EnsureTiming) {
   const current = yield* read(options.file)
   if (current === undefined || !same(current, info)) return
-  yield* signal(info.pid, "SIGTERM")
-  const done = yield* stopped(info.pid).pipe(Effect.retry(poll(timing)), Effect.option)
-  // The registration can disappear or change hands before this process exits. Only the PID we
-  // signalled can tell us whether it has stopped, so escalate based on that process.
-  if (Option.isNone(done)) {
-    yield* signal(info.pid, "SIGKILL")
-    yield* stopped(info.pid).pipe(Effect.retry(poll(timing)))
+  // A dead pid is already stopped: signalling it would either fail or, if the pid has been reused,
+  // hit an unrelated process. Only a live registration is escalated.
+  if (alive(info.pid)) {
+    yield* signal(info.pid, "SIGTERM")
+    const done = yield* stopped(info.pid).pipe(Effect.retry(poll(timing)), Effect.option)
+    // The registration can disappear or change hands before this process exits. Only the PID we
+    // signalled can tell us whether it has stopped, so escalate based on that process.
+    if (Option.isNone(done)) {
+      yield* signal(info.pid, "SIGKILL")
+      yield* stopped(info.pid).pipe(Effect.retry(poll(timing)))
+    }
   }
   const latest = yield* read(options.file)
   if (latest === undefined || !same(latest, info)) return

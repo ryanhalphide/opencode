@@ -105,6 +105,28 @@ export async function serviceFixture() {
   }
 }
 
+// A pid that is provably gone: a child that has already exited and been reaped, so `kill(pid, 0)`
+// answers ESRCH exactly as a crashed service's registration would.
+export async function deadPid() {
+  const child = Bun.spawn([process.execPath, "-e", "process.exit(0)"], { stdout: "ignore", stderr: "ignore" })
+  await child.exited
+  await waitForExit(child.pid)
+  return child.pid
+}
+
+// A live process that listens on nothing, so a probe against it is refused rather than unanswered.
+export function livePid() {
+  return Bun.spawn([process.execPath, "-e", "setTimeout(() => {}, 30_000)"], { stdout: "ignore", stderr: "ignore" })
+}
+
+// A URL nothing is listening on: the port is bound only long enough to reserve it.
+export function freeUrl() {
+  const server = Bun.serve({ port: 0, fetch: () => new Response(null, { status: 404 }) })
+  const url = server.url.toString()
+  server.stop(true)
+  return url
+}
+
 // The service listens on an ephemeral port. Once it stops, any process may reuse that port for an outgoing connection
 // (Windows hands them out from 49152 up, and other suites run alongside), so binding it again proves nothing. What the
 // tests need is that nothing accepts connections there anymore.
