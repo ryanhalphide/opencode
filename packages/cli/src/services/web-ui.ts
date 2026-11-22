@@ -1,17 +1,28 @@
 import { FSUtil } from "@opencode/util/fs-util"
-import { Effect, FileSystem } from "effect"
+import { Effect, FileSystem, Option, Ref } from "effect"
 import { HttpServerError, HttpServerRequest, HttpServerResponse } from "effect/http"
 import { createHash } from "node:crypto"
 import { load, type AssetMap, type BrotliMap } from "../app-assets"
+
+type LoadedAssets = { readonly files: AssetMap; readonly brotli: BrotliMap | undefined }
 
 export const handler = Effect.fn("cli.web-ui.handler")(function* (options?: {
   readonly assets?: AssetMap
   readonly brotli?: BrotliMap
 }) {
   const fileSystem = yield* FileSystem.FileSystem
-  const assets = options?.assets
-    ? Effect.succeed({ files: options.assets, brotli: options.brotli })
-    : yield* Effect.cached(load().pipe(Effect.provideService(FileSystem.FileSystem, fileSystem)))
+  // Cache successful loads only. `Effect.cached` memoises failures as well, so a server started before
+  // `packages/app/dist` existed answered 500 on every UI request until the process was restarted.
+  const loaded = yield* Ref.make<Option.Option<LoadedAssets>>(
+    options?.assets ? Option.some({ files: options.assets, brotli: options.brotli }) : Option.none(),
+  )
+  const assets = Effect.gen(function* () {
+    const hit = yield* Ref.get(loaded)
+    if (Option.isSome(hit)) return hit.value
+    const value = yield* load().pipe(Effect.provideService(FileSystem.FileSystem, fileSystem))
+    yield* Ref.set(loaded, Option.some(value))
+    return value
+  })
   return <E, R>(api: Effect.Effect<HttpServerResponse.HttpServerResponse, E, R>) =>
     Effect.gen(function* () {
       const request = yield* HttpServerRequest.HttpServerRequest
