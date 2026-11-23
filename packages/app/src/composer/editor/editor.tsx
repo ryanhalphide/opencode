@@ -111,6 +111,9 @@ export function ComposerEditor(props: ComposerEditorProps) {
   let content: HTMLDivElement | undefined
   let editor: HTMLDivElement | undefined
   let viewport: HTMLDivElement | undefined
+  // Text selected outside the composer, read on pointerdown and spent on the matching pointerup.
+  // Click-to-paste: highlight text anywhere in the app, then click into the composer to paste it.
+  let pendingSelectionPaste = ""
   let controlsViewport!: HTMLDivElement
   let controlsContent!: HTMLDivElement
   const [overflow, setOverflow] = createStore({ start: false, end: false })
@@ -404,7 +407,53 @@ export function ComposerEditor(props: ComposerEditorProps) {
                 document.execCommand("insertLineBreak")
               }}
               onKeyUp={updateCursor}
-              onPointerUp={updateCursor}
+              // Click-to-paste. A selection the user dragged anywhere outside the composer (a transcript
+              // paragraph, a diff, a log line) is spent on the click that puts the caret back in here, so
+              // highlighting then clicking into the box pastes. It has to be read on pointerdown: the
+              // browser's default action for that same event collapses the selection onto the caret.
+              onPointerDown={() => {
+                const selection = window.getSelection()
+
+                if (!selection || selection.isCollapsed || !selection.anchorNode) {
+                  pendingSelectionPaste = ""
+
+                  return
+                }
+
+                // A selection inside the composer is the user's own text, not something to paste over.
+                pendingSelectionPaste = editor?.contains(selection.anchorNode) ? "" : selection.toString()
+              }}
+              onPointerUp={() => {
+                updateCursor()
+
+                const text = pendingSelectionPaste
+
+                pendingSelectionPaste = ""
+
+                if (!text || !editor) return
+
+                const selection = window.getSelection()
+
+                // Only paste where this click actually put the caret inside the editor.
+                if (!selection?.isCollapsed || !selection.anchorNode || !editor.contains(selection.anchorNode)) return
+
+                // Same insertion as onPaste below, so undo, cursor placement and the draft parser see
+                // exactly what a real paste would have produced.
+                const normalized = text.replace(/\r\n?/g, "\n")
+                const multiline = normalized.includes("\n")
+
+                const value = multiline
+                  ? normalized.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
+                  : normalized
+
+                if (document.execCommand(multiline ? "insertHTML" : "insertText", false, value)) return
+
+                const range = selection.getRangeAt(0)
+
+                range.deleteContents()
+                range.insertNode(document.createTextNode(normalized))
+                range.collapse(false)
+              }}
               onPaste={(event) => {
                 props.controller.onPaste(event)
                 // Programmatic multiline insertion does not reliably reveal the caret.

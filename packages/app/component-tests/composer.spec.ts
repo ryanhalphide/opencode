@@ -856,3 +856,29 @@ story.describe("mobile variant drawer", () => {
     })
   }
 })
+
+story("pastes text selected outside the composer when it is clicked", async ({ mount, page }) => {
+  const component = await mount("opencode-composer-flow--prompt-history")
+  const input = component.getByRole("textbox", { name: "Prompt", exact: true })
+
+  // A selection made outside the editor. The harness mounts only the composer, so the paragraph it is
+  // dragged from is injected into the document: click-to-paste reads window.getSelection() wherever the
+  // selection was made, not only inside this component.
+  await page.evaluate(() => {
+    const paragraph = document.createElement("p")
+    paragraph.id = "external-selection"
+    paragraph.textContent = "quoted from the transcript"
+    document.body.appendChild(paragraph)
+
+    const range = document.createRange()
+    range.selectNodeContents(paragraph)
+    const selection = window.getSelection()!
+
+    selection.removeAllRanges()
+    selection.addRange(range)
+  })
+
+  await input.click()
+
+  await expect(input).toHaveText("quoted from the transcript")
+})
