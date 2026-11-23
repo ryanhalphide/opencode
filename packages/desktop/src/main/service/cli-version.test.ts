@@ -3,8 +3,20 @@ import { keptStages, serviceFilename, serviceVersion, shouldRetryEnsure } from "
 
 describe("cli-version", () => {
   test.each([
-    { channel: "beta" as const, isolated: false, mode: "initial" as const, version: "0.0.0-beta-2", expected: undefined },
-    { channel: "beta" as const, isolated: true, mode: "initial" as const, version: "0.0.0-beta-2", expected: "0.0.0-beta-2" },
+    {
+      channel: "beta" as const,
+      isolated: false,
+      mode: "initial" as const,
+      version: "0.0.0-beta-2",
+      expected: undefined,
+    },
+    {
+      channel: "beta" as const,
+      isolated: true,
+      mode: "initial" as const,
+      version: "0.0.0-beta-2",
+      expected: "0.0.0-beta-2",
+    },
     { channel: "prod" as const, isolated: false, mode: "initial" as const, version: "2.0.32", expected: "2.0.32" },
   ])("serviceVersion($channel, isolated=$isolated) -> $expected", (input) => {
     expect(serviceVersion(input)).toBe(input.expected)
@@ -15,6 +27,9 @@ describe("cli-version", () => {
     { version: "local", expected: "service-local.json" },
     { version: "2.0.0-local-1795393044445", expected: "service-local.json" },
     { version: "0.0.0-rh2-opencode-feedback-202611222045", expected: "service-rh2-opencode-feedback.json" },
+    { version: "2.3.2-rh2-opencode-feedback-202611222045", expected: "service-rh2-opencode-feedback.json" },
+    { version: "2.3.2-rh2-opencode-feedback-17403.2", expected: "service-rh2-opencode-feedback.json" },
+    { version: "2.3.2-beta-2", expected: "service.json" },
     { version: "0.0.0-beta-2", expected: "service.json" },
     { version: "0.0.0-dev-1795222193706", expected: "service.json" },
     { version: "2.0.32", expected: "service.json" },
@@ -36,7 +51,8 @@ describe("cli-version", () => {
     { version: undefined, message: "Timed out waiting for the background service to start", expected: true },
     {
       version: undefined,
-      message: "Background service uses an incompatible health protocol. Update this client or explicitly restart the service.",
+      message:
+        "Background service uses an incompatible health protocol. Update this client or explicitly restart the service.",
       expected: false,
     },
     { version: "2.0.32", message: "Background service failed to start", expected: false },

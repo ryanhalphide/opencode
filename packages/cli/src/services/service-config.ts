@@ -71,9 +71,11 @@ export function versionBelongsToChannel(
 ) {
   if (version === undefined) return false
   if (version === installedVersion) return true
-  const prefix = `0.0.0-${channel}-`
-  if (!version.startsWith(prefix)) return false
-  return /^\d+(?:\.\d+)?$/.test(version.slice(prefix.length))
+  // Preview builds report `<base>-<channel>-<build>`; the base was `0.0.0` before it tracked the release line.
+  const rest = version.replace(/^\d+\.\d+\.\d+-/, "")
+  const prefix = `${channel}-`
+  if (rest === version || !rest.startsWith(prefix)) return false
+  return /^\d+(?:\.\d+)?$/.test(rest.slice(prefix.length))
 }
 
 export const migrateRegistration = Effect.fnUntraced(function* (

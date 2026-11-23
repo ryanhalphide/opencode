@@ -1,6 +1,7 @@
 import { $ } from "bun"
 import semver from "semver"
 import path from "path"
+import { isPreviewVersion, previewVersion } from "./version"
 
 const rootPkgPath = path.resolve(import.meta.dir, "../../../package.json")
 const rootPkg = await Bun.file(rootPkgPath).json()
@@ -23,7 +24,7 @@ const env = {
 }
 const CHANNEL = await (async () => {
   if (env.OPENCODE_CHANNEL) return env.OPENCODE_CHANNEL
-  if (env.OPENCODE_VERSION && !env.OPENCODE_VERSION.startsWith("0.0.0-")) return "latest"
+  if (env.OPENCODE_VERSION && !isPreviewVersion(env.OPENCODE_VERSION)) return "latest"
   const branch = await $`git branch --show-current`.text().then((x) => x.trim())
   if (!branch) return "detached"
   const channel = branch.replace(/[^a-zA-Z0-9._-]/g, "-")
@@ -33,10 +34,12 @@ const CHANNEL = await (async () => {
 const IS_PREVIEW = CHANNEL !== "latest"
 
 // The release workflow's plan job owns release versions; builds only read them.
-const VERSION = (() => {
+const VERSION = await (async () => {
   if (env.OPENCODE_VERSION) return env.OPENCODE_VERSION
   if (!IS_PREVIEW) throw new Error("OPENCODE_VERSION is required for latest-channel builds")
-  return `0.0.0-${CHANNEL}-${previewBuildNumber()}`
+  // Preview builds carry the current release line as their base, so the API's minimum-version gate accepts them.
+  const core = await Bun.file(path.resolve(import.meta.dir, "../../core/package.json")).json()
+  return previewVersion(core.version, CHANNEL, previewBuildNumber())
 })()
 
 function previewBuildNumber() {
