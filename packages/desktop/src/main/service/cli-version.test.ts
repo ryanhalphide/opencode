@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { keptStages, serviceVersion, shouldRetryEnsure } from "./cli-version"
+import { keptStages, serviceFilename, serviceVersion, shouldRetryEnsure } from "./cli-version"
 
 describe("cli-version", () => {
   test.each([
@@ -8,6 +8,17 @@ describe("cli-version", () => {
     { channel: "prod" as const, isolated: false, mode: "initial" as const, version: "2.0.32", expected: "2.0.32" },
   ])("serviceVersion($channel, isolated=$isolated) -> $expected", (input) => {
     expect(serviceVersion(input)).toBe(input.expected)
+  })
+
+  test.each([
+    { version: "0.0.0-local-1795222193706", expected: "service-local.json" },
+    { version: "0.0.0-rh2-opencode-feedback-202611222045", expected: "service-rh2-opencode-feedback.json" },
+    { version: "0.0.0-beta-2", expected: "service.json" },
+    { version: "0.0.0-dev-1795222193706", expected: "service.json" },
+    { version: "2.0.32", expected: "service.json" },
+    { version: undefined, expected: "service.json" },
+  ])("serviceFilename($version) -> $expected", (input) => {
+    expect(serviceFilename(input.version)).toBe(input.expected)
   })
 
   test.each([

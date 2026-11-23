@@ -30,6 +30,23 @@ export function shouldRetryEnsure(version: string | undefined, message: string) 
   )
 }
 
+// Stock channels share one registration file; every other channel gets its own.
+const STOCK_CHANNELS = new Set(["latest", "dev", "beta", "next"])
+
+/**
+ * The registration file a CLI build writes, resolved the way the CLI resolves it: a stock channel shares
+ * `service.json`, and any other channel gets `service-<channel>.json`. The CLI's channel is a compile-time
+ * constant, and the version it reports (`0.0.0-<channel>-<build>`) is the only place this process can read it,
+ * so a locally built CLI with a custom channel is found by its real name rather than a guessed one.
+ */
+export function serviceFilename(version: string | undefined) {
+  const channel = version?.match(/^0\.0\.0-([a-zA-Z0-9._-]+)-\d+$/)?.[1]
+
+  if (channel === undefined || STOCK_CHANNELS.has(channel)) return "service.json"
+
+  return `service-${channel.replace(/[^a-zA-Z0-9._-]/g, "-")}.json`
+}
+
 export function stageName(version: string, arch = process.arch) {
   return `${version}-${arch}`.replace(/[^a-zA-Z0-9._-]/g, "-")
 }

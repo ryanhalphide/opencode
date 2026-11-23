@@ -7,7 +7,7 @@ import { emitIpcEvent } from "../ipc-events"
 import { getMainWindows } from "../windows"
 import { BackgroundServiceMachine } from "./background-service-machine"
 import { cleanStages } from "./cli-stages"
-import { keptStages, serviceVersion, shouldRetryEnsure } from "./cli-version"
+import { keptStages, serviceFilename, serviceVersion, shouldRetryEnsure } from "./cli-version"
 import { DesktopCli } from "./desktop-cli"
 import { SidecarCredentials } from "./sidecar-credentials"
 import { takeSidecarProbe } from "./sidecar-probe"
@@ -108,14 +108,13 @@ const prepare = Effect.fn("BackgroundService.prepare")(function* (mode: Backgrou
   if (isolated) process.env.XDG_STATE_HOME = app.getPath("userData")
   const client = yield* Effect.promise(() => import("@opencode/client/service"))
 
-  const file =
-    process.env.OPENCODE_DESKTOP_SERVER_CHANNEL === "local"
-      ? path.join(
-          process.env.XDG_STATE_HOME ?? path.join(app.getPath("home"), ".local", "state"),
-          "opencode",
-          "service-local.json",
-        )
-      : undefined
+  // The CLI's channel is a build constant it reports only in its version, so its registration file is derived
+  // from that version: a locally built CLI on a custom channel registers under its own name, not `service-local.json`.
+  const file = path.join(
+    process.env.XDG_STATE_HOME ?? path.join(app.getPath("home"), ".local", "state"),
+    "opencode",
+    serviceFilename(cli.version),
+  )
 
   return { cli, client, file, isolated, version }
 })
