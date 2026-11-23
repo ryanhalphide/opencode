@@ -12,6 +12,8 @@ describe("cli-version", () => {
 
   test.each([
     { version: "0.0.0-local-1795222193706", expected: "service-local.json" },
+    { version: "local", expected: "service-local.json" },
+    { version: "2.0.0-local-1795393044445", expected: "service-local.json" },
     { version: "0.0.0-rh2-opencode-feedback-202611222045", expected: "service-rh2-opencode-feedback.json" },
     { version: "0.0.0-beta-2", expected: "service.json" },
     { version: "0.0.0-dev-1795222193706", expected: "service.json" },

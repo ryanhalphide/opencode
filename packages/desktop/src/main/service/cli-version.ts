@@ -40,7 +40,9 @@ const STOCK_CHANNELS = new Set(["latest", "dev", "beta", "next"])
  * so a locally built CLI with a custom channel is found by its real name rather than a guessed one.
  */
 export function serviceFilename(version: string | undefined) {
-  const channel = version?.match(/^0\.0\.0-([a-zA-Z0-9._-]+)-\d+$/)?.[1]
+  const channel =
+    version?.match(/^\d+\.\d+\.\d+-([a-zA-Z0-9._-]+?)-\d+$/)?.[1] ??
+    (version !== undefined && /^[a-zA-Z][a-zA-Z0-9._-]*$/.test(version) ? version : undefined)
 
   if (channel === undefined || STOCK_CHANNELS.has(channel)) return "service.json"
 
