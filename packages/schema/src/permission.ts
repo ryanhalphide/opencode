@@ -31,6 +31,9 @@ const RequestFields = {
   metadata: Schema.Record(Schema.String, Schema.Unknown).pipe(optional),
   source: Source.pipe(optional),
   message: Schema.String.pipe(optional),
+  // True when the ask comes from a declared rule (an agent, the config or a plugin hook) rather than from the
+  // catch-all default. A client that answers requests programmatically must not approve it.
+  strict: Schema.Boolean.pipe(optional),
 }
 
 export const Request = Schema.Struct({

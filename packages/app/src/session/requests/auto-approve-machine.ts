@@ -30,6 +30,8 @@ export type AutoApproveState =
       readonly attempt: number
     }
   | { readonly status: "replied" }
+  // The ask comes from a rule the agent declares, so no automatic reply may grant it: it waits for the user.
+  | { readonly status: "needs-user" }
   | { readonly status: "gave-up"; readonly projectID: string | undefined }
 
 export type AutoApproveEvent =
@@ -38,6 +40,8 @@ export type AutoApproveEvent =
       readonly sessionID: string
       readonly projectID: string | undefined
       readonly runId: string
+      /** The server marked the ask as coming from a declared rule, so only the user may approve it. */
+      readonly strict: boolean
     }
   | { readonly type: "reply.succeeded"; readonly runId: string; readonly attempt: number }
   | { readonly type: "reply.failed"; readonly runId: string; readonly attempt: number }
@@ -86,6 +90,9 @@ export function transitionAutoApprove(state: AutoApproveState, event: AutoApprov
   if (event.type === "approve") {
     if (state.status !== "pending") return unchanged(state)
 
+    // Never answers a declared ask: it lands as the user's decision and stays there with no timer to settle it.
+    if (event.strict) return changed({ status: "needs-user" })
+
     return changed(
       { status: "replying", sessionID: event.sessionID, projectID: event.projectID, runId: event.runId, attempt: 0 },
       [reply(event.sessionID, event.runId, 0)],
@@ -120,6 +127,8 @@ export function transitionAutoApprove(state: AutoApproveState, event: AutoApprov
 // Auto-approve hides it only while a cycle can still answer it.
 export function needsUser(state: AutoApproveState, autoApprove: boolean) {
   if (state.status === "replied") return false
+
+  if (state.status === "needs-user") return true
 
   if (state.status === "gave-up") return true
 

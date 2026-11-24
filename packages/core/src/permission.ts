@@ -91,16 +91,18 @@ export class NotFoundError extends Schema.TaggedError<NotFoundError>()("Permissi
 
 export type Error = BlockedError | CorrectedError
 
+/**
+ * The winning rule for one resource, or `undefined` when no rule of the given rulesets matches it.
+ * `evaluate` cannot report that distinction, because it supplies the catch-all default itself.
+ */
+function winning(action: string, resource: string, ...rulesets: Permission.Ruleset[]): Permission.Rule | undefined {
+  return rulesets
+    .flat()
+    .findLast((rule) => Wildcard.match(action, rule.action) && Wildcard.match(resource, rule.resource))
+}
+
 export function evaluate(action: string, resource: string, ...rulesets: Permission.Ruleset[]): Permission.Rule {
-  return (
-    rulesets
-      .flat()
-      .findLast((rule) => Wildcard.match(action, rule.action) && Wildcard.match(resource, rule.resource)) ?? {
-      action,
-      resource: "*",
-      effect: "ask",
-    }
-  )
+  return winning(action, resource, ...rulesets) ?? { action, resource: "*", effect: "ask" }
 }
 
 export function merge(...rulesets: Permission.Ruleset[]): Permission.Ruleset {
@@ -202,7 +204,8 @@ const layer = Layer.effect(
       const rules = yield* configured(input.sessionID, input.agent)
       if (denied(input, rules)) return { effect: "deny" as const, rules }
       const all = [...rules, ...(yield* savedRules())]
-      const effects = input.resources.map((resource) => evaluate(input.action, resource, all).effect)
+      const winningRules = input.resources.map((resource) => winning(input.action, resource, all))
+      const effects = winningRules.map((rule) => rule?.effect ?? "ask")
       const effect: Permission.Effect = effects.includes("ask") ? "ask" : "allow"
       const event = yield* hooks.trigger("permission", "evaluate", {
         sessionID: input.sessionID,
@@ -213,9 +216,13 @@ const layer = Layer.effect(
         source: row(input.source),
         effect,
       })
+      // A declared ask is a decision someone wrote down, so it is never the catch-all default a programmatic
+      // replier may answer. A hook that turns a configured allow into an ask declares one just the same.
+      const strict =
+        winningRules.some((rule) => rule?.effect === "ask") || (effect === "allow" && event.effect === "ask")
       const unattended = yield* Unattended
       if (event.effect !== "ask" || unattended === undefined)
-        return { effect: event.effect, message: event.message, rules: all }
+        return { effect: event.effect, message: event.message, rules: all, strict }
       const settled = [...all, ...unattended]
       const allowed = input.resources.every((resource) => evaluate(input.action, resource, settled).effect === "allow")
       if (allowed) return { effect: "allow" as const, rules: all }
@@ -226,7 +233,7 @@ const layer = Layer.effect(
       }
     })
 
-    function request(input: AssertInput, message?: string): Request {
+    function request(input: AssertInput, message?: string, strict?: boolean): Request {
       return {
         id: input.id ?? ID.create(),
         sessionID: input.sessionID,
@@ -240,6 +247,8 @@ const layer = Layer.effect(
           Object.fromEntries(Object.entries(input.metadata).filter(([, value]) => value !== undefined)),
         source: row(input.source),
         message,
+        // Only a declared ask carries the flag, so an absent field is the catch-all default any client may answer.
+        ...(strict ? { strict } : {}),
       }
     }
 
@@ -265,7 +274,7 @@ const layer = Layer.effect(
     const ask = Effect.fn("Permission.ask")(function* (input: AssertInput) {
       if (closed) return { id: input.id ?? ID.create(), effect: "deny" as const }
       const result = yield* evaluateInput(input)
-      const value = request(input, result.message)
+      const value = request(input, result.message, result.strict)
       if (result.effect === "ask") yield* create(value, input.agent)
       return { id: value.id, effect: result.effect }
     })
@@ -285,7 +294,7 @@ const layer = Layer.effect(
               })
             }
             if (result.effect === "allow") return
-            const item = yield* create(request(input, result.message), input.agent)
+            const item = yield* create(request(input, result.message, result.strict), input.agent)
             return yield* restore(Deferred.await(item.deferred)).pipe(
               // Deliberate defect tunnel: leaves wrap execution in blanket `mapError`, which
               // must not convert a user's decline into model-facing tool output. The decline

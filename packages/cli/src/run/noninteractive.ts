@@ -57,6 +57,9 @@ const QUESTION_CANCELLED_FEEDBACK =
 const PERMISSION_REJECTED_FEEDBACK =
   "This non-interactive run cannot ask the user for permission, so the request was rejected. Continue without this action."
 
+const permissionDeclaredFeedback = (request: Pick<PermissionRequest, "action" | "resources">) =>
+  `The agent declares this permission as a rule (${request.action}: ${request.resources.join(", ")}), so only the user may approve it, in an interactive session. This non-interactive run cannot, so the request was rejected. Continue without this action.`
+
 /**
  * Runs one prompt to completion:
  *
@@ -95,18 +98,28 @@ export async function runNonInteractivePrompt(input: Input) {
   }
 
   const replyPermission = async (request: PermissionRequest) => {
-    if (!input.auto)
+    // A declared ask is a decision the agent's own rules reserve for the user, so answering requests on the user's
+    // behalf must not grant it: --auto included.
+    const declared = input.auto && request.strict === true
+    if (declared)
+      UI.println(
+        UI.Style.TEXT_WARNING_BOLD + "!",
+        UI.Style.TEXT_NORMAL +
+          `permission requested: ${request.action} (${request.resources.join(", ")}); it comes from a rule the agent declares, so it must be approved in an interactive session; auto-rejecting`,
+      )
+    else if (!input.auto)
       UI.println(
         UI.Style.TEXT_WARNING_BOLD + "!",
         UI.Style.TEXT_NORMAL +
           `permission requested: ${request.action} (${request.resources.join(", ")}); auto-rejecting`,
       )
+    const approve = input.auto && !declared
     await input.client.permission
       .reply({
         sessionID: request.sessionID,
         requestID: request.id,
-        decision: input.auto ? "once" : "reject",
-        ...(input.auto ? {} : { message: PERMISSION_REJECTED_FEEDBACK }),
+        decision: approve ? "once" : "reject",
+        ...(approve ? {} : { message: declared ? permissionDeclaredFeedback(request) : PERMISSION_REJECTED_FEEDBACK }),
       })
       .catch(() => {})
   }

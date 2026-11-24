@@ -77,9 +77,10 @@ export function createPermissionAutoApprover(input: { sdk: ServerSDK; data: Data
 
   // Turning auto-approve off for a request's project stops its cycle, so a
   // scheduled retry never answers for the user and turning it on again starts over.
+  // A declared ask waits on the user rather than on this setting, so it stays put.
   createEffect(() => {
     Object.entries(requests).forEach(([id, state]) => {
-      if (!state || state.status === "pending" || state.status === "replied") return
+      if (!state || state.status === "pending" || state.status === "replied" || state.status === "needs-user") return
 
       if (!covers(state.projectID)) dispatch(id, { type: "cancel" })
     })
@@ -264,7 +265,14 @@ export function createPermissionAutoApprover(input: { sdk: ServerSDK; data: Data
 
   function approve(permission: PermissionRequest, projectID = input.data.session.get(permission.sessionID)?.projectID) {
     if (!covers(projectID)) return
-    dispatch(permission.id, { type: "approve", sessionID: permission.sessionID, projectID, runId: uuid() })
+    dispatch(permission.id, {
+      type: "approve",
+      sessionID: permission.sessionID,
+      projectID,
+      runId: uuid(),
+      // A declared ask is the user's decision, so the cycle parks it in the dock instead of replying.
+      strict: permission.strict === true,
+    })
   }
 
   return {
