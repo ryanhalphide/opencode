@@ -357,9 +357,40 @@ describe("Permission", () => {
             action: "glob",
             resources: ["/project"],
             metadata: { root: "/project" },
+            // Clients decide whether a programmatic approver may answer from this field, so it must reach them.
+            reason: { kind: "default" },
           },
         ],
       })
+    }),
+  )
+
+  it.effect("records the rule that asked, and the catch-all when nothing matched", () =>
+    Effect.gen(function* () {
+      yield* setup([
+        { action: "shell", resource: "git *", effect: "ask" },
+        { action: "read", resource: "*", effect: "allow" },
+      ])
+      const gated = yield* waitForRequest({ action: "shell", resources: ["git status"] })
+
+      expect(gated.request.reason).toEqual({
+        kind: "rule",
+        rule: { action: "shell", resource: "git *", effect: "ask" },
+      })
+      yield* gated.service.reply({ requestID: gated.request.id, reply: "once" })
+      yield* Fiber.join(gated.fiber)
+
+      // Nothing matched, so the catch-all asked and a programmatic approver may answer it.
+      yield* setRules([])
+      const open = yield* waitForRequest({
+        id: Permission.ID.create("per_default"),
+        action: "shell",
+        resources: ["git status"],
+      })
+
+      expect(open.request.reason).toEqual({ kind: "default" })
+      yield* open.service.reply({ requestID: open.request.id, reply: "once" })
+      yield* Fiber.join(open.fiber)
     }),
   )
 

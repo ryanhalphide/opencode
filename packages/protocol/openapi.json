@@ -21578,6 +21578,20 @@
               "$ref": "#/components/schemas/Model.Cost"
             }
           },
+          "costMultipliers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "when": {
+                  "type": "object"
+                },
+                "factor": {}
+              },
+              "required": ["when", "factor"],
+              "additionalProperties": false
+            }
+          },
           "status": {
             "type": "string",
             "enum": ["alpha", "beta", "deprecated", "active"]
@@ -21787,6 +21801,35 @@
         "type": "string",
         "pattern": "^per"
       },
+      "Permission.Reason": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": ["rule"]
+              },
+              "rule": {
+                "$ref": "#/components/schemas/Permission.Rule"
+              }
+            },
+            "required": ["kind", "rule"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": ["default"]
+              }
+            },
+            "required": ["kind"],
+            "additionalProperties": false
+          }
+        ]
+      },
       "Permission.Reply": {
         "type": "string",
         "enum": ["once", "always", "reject"]
@@ -21823,6 +21866,9 @@
           },
           "message": {
             "type": "string"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/Permission.Reason"
           }
         },
         "required": ["id", "sessionID", "action", "resources"],
@@ -27323,6 +27369,9 @@
               },
               "message": {
                 "type": "string"
+              },
+              "reason": {
+                "$ref": "#/components/schemas/Permission.Reason"
               }
             },
             "required": ["id", "sessionID", "action", "resources"],

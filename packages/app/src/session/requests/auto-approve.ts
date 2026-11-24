@@ -9,6 +9,7 @@ import { projectSettingsKey, useSettings } from "@/settings/model"
 import {
   INITIAL_AUTO_APPROVE_STATE,
   INITIAL_AUTO_APPROVE_SWEEP_STATE,
+  autoApprovable,
   transitionAutoApprove,
   transitionAutoApproveSweep,
   type AutoApproveEffect,
@@ -79,7 +80,7 @@ export function createPermissionAutoApprover(input: { sdk: ServerSDK; data: Data
   // scheduled retry never answers for the user and turning it on again starts over.
   createEffect(() => {
     Object.entries(requests).forEach(([id, state]) => {
-      if (!state || state.status === "pending" || state.status === "replied") return
+      if (!state || state.status === "pending" || state.status === "replied" || state.status === "held") return
 
       if (!covers(state.projectID)) dispatch(id, { type: "cancel" })
     })
@@ -264,6 +265,8 @@ export function createPermissionAutoApprover(input: { sdk: ServerSDK; data: Data
 
   function approve(permission: PermissionRequest, projectID = input.data.session.get(permission.sessionID)?.projectID) {
     if (!covers(projectID)) return
+    // A rule that asked is a gate its author wants a person to see; the dock shows it and no cycle answers it.
+    if (!autoApprovable(permission)) return dispatch(permission.id, { type: "hold" })
     dispatch(permission.id, { type: "approve", sessionID: permission.sessionID, projectID, runId: uuid() })
   }
 

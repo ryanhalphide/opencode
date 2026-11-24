@@ -15,6 +15,8 @@ export const AUTO_APPROVE_SWEEP_TIMEOUT_MS = 30_000
 // it, so a reply or timer from a cancelled or resolved cycle can never move a later one.
 export type AutoApproveState =
   | { readonly status: "pending" }
+  // A request a rule asked for: a person answers it, so no cycle owns it and the dock always shows it.
+  | { readonly status: "held" }
   | {
       readonly status: "replying"
       readonly sessionID: string
@@ -39,6 +41,8 @@ export type AutoApproveEvent =
       readonly projectID: string | undefined
       readonly runId: string
     }
+  // Keeps a request nobody but the user may answer, without starting a cycle.
+  | { readonly type: "hold" }
   | { readonly type: "reply.succeeded"; readonly runId: string; readonly attempt: number }
   | { readonly type: "reply.failed"; readonly runId: string; readonly attempt: number }
   | { readonly type: "reply.timed-out"; readonly runId: string; readonly attempt: number }
@@ -92,6 +96,12 @@ export function transitionAutoApprove(state: AutoApproveState, event: AutoApprov
     )
   }
 
+  if (event.type === "hold") {
+    if (state.status !== "pending") return unchanged(state)
+
+    return changed({ status: "held" })
+  }
+
   if (event.type === "reply.succeeded") {
     if (state.status !== "replying" || !current(state, event)) return unchanged(state)
 
@@ -121,9 +131,16 @@ export function transitionAutoApprove(state: AutoApproveState, event: AutoApprov
 export function needsUser(state: AutoApproveState, autoApprove: boolean) {
   if (state.status === "replied") return false
 
-  if (state.status === "gave-up") return true
+  if (state.status === "gave-up" || state.status === "held") return true
 
   return !autoApprove
+}
+
+// Whether a programmatic approver may answer this request at all. Only the catch-all default may be answered for the
+// user: an ask a rule produced is a gate its author asked a person to see, and answering it silently erases that gate.
+// A request from a server without `reason` asked through the default, which is why its absence auto-approves.
+export function autoApprovable(request: { readonly reason?: { readonly kind: "rule" | "default" } }) {
+  return request.reason?.kind !== "rule"
 }
 
 // The connect sweep of one server: it finds requests asked while this client was disconnected, or before auto-approve

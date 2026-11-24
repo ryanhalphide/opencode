@@ -4,6 +4,7 @@ import {
   AUTO_APPROVE_SWEEP_TIMEOUT_MS,
   INITIAL_AUTO_APPROVE_STATE,
   INITIAL_AUTO_APPROVE_SWEEP_STATE,
+  autoApprovable,
   needsUser,
   transitionAutoApprove,
   transitionAutoApproveSweep,
@@ -49,6 +50,8 @@ const reply = (runId: string, attempt: number): AutoApproveEffect => ({
 })
 
 const gaveUp: AutoApproveState = { status: "gave-up", projectID: "proj_1" }
+
+const held: AutoApproveState = { status: "held" }
 
 function replay(events: AutoApproveEvent[], from = INITIAL_AUTO_APPROVE_STATE) {
   return events.reduce<AutoApproveTransition[]>((steps, event) => {
@@ -206,6 +209,7 @@ describe("transitionAutoApprove", () => {
       effects: [{ type: "cancel-retry" }],
     },
     { from: gaveUp, cancel: INITIAL_AUTO_APPROVE_STATE, resolved: { status: "replied" }, effects: [] },
+    { from: held, cancel: INITIAL_AUTO_APPROVE_STATE, resolved: { status: "replied" }, effects: [] },
     { from: { status: "replied" }, cancel: { status: "replied" }, resolved: { status: "replied" }, effects: [] },
   ])("cancel and resolved from $from.status", (input) => {
     expect(transitionAutoApprove(input.from, { type: "cancel" })).toEqual({
@@ -224,10 +228,41 @@ test.each<{ state: AutoApproveState; on: boolean; off: boolean }>([
   { state: replying("r1", 0), on: false, off: true },
   { state: waiting("r1", 1), on: false, off: true },
   { state: gaveUp, on: true, off: true },
+  { state: held, on: true, off: true },
   { state: { status: "replied" }, on: false, off: false },
 ])("needsUser for $state.status", (input) => {
   expect(needsUser(input.state, true)).toBe(input.on)
   expect(needsUser(input.state, false)).toBe(input.off)
+})
+
+test.each<{ request: { reason?: { kind: "rule" | "default" } }; auto: boolean }>([
+  // An agent that declares `effect: ask` in its frontmatter, and a config ruleset that asks, both reach the client
+  // as a rule. Auto-approving either one answers a gate its author asked a person to see.
+  { request: { reason: { kind: "rule" } }, auto: false },
+  { request: { reason: { kind: "default" } }, auto: true },
+  // A server older than the reason field only ever asked through the catch-all default.
+  { request: {}, auto: true },
+])("autoApprovable for $request.reason", (input) => {
+  expect(autoApprovable(input.request)).toBe(input.auto)
+})
+
+describe("a request a rule asked for", () => {
+  test("is held for the user instead of approved", () => {
+    const holding = transitionAutoApprove(INITIAL_AUTO_APPROVE_STATE, { type: "hold" })
+
+    expect(holding.state).toEqual(held)
+    expect(holding.effects).toEqual([])
+    // The dock and every badge count a visible request, so auto-approve being on must not hide this one.
+    expect(needsUser(holding.state, true)).toBe(true)
+
+    // Store scans, the connect sweep and repeated approvals all reach the same request; none may start a cycle.
+    const rescanned = [approve("r2"), approve("r3")].map((event) => transitionAutoApprove(holding.state, event))
+
+    expect(rescanned.map((step) => step.state)).toEqual([held, held])
+    expect(rescanned.flatMap((step) => step.effects)).toEqual([])
+
+    expect(transitionAutoApprove(holding.state, { type: "resolved" }).state).toEqual({ status: "replied" })
+  })
 })
 
 describe("transitionAutoApproveSweep", () => {

@@ -57,6 +57,14 @@ const QUESTION_CANCELLED_FEEDBACK =
 const PERMISSION_REJECTED_FEEDBACK =
   "This non-interactive run cannot ask the user for permission, so the request was rejected. Continue without this action."
 
+/** The model-facing reason a gated request was rejected, naming the rule so a reader can find what asked. */
+export function gatedPermissionFeedback(action: string, rule: { action: string; resource: string }) {
+  return (
+    `This non-interactive run cannot ask the user for permission, so the request for ${action} was rejected: ` +
+    `the permission rule ${rule.action} → ${rule.resource} asks for a person to approve it. Continue without this action.`
+  )
+}
+
 /**
  * Runs one prompt to completion:
  *
@@ -95,18 +103,25 @@ export async function runNonInteractivePrompt(input: Input) {
   }
 
   const replyPermission = async (request: PermissionRequest) => {
-    if (!input.auto)
+    // `--auto` answers permission requests nobody declared a gate for. A rule that asked (an agent's own frontmatter
+    // or the config ruleset) is a gate someone wants a person to see, and this run has none: it rejects and names the
+    // rule instead of waiting, and instead of erasing the gate it was asked to respect.
+    const gate = request.reason?.kind === "rule" ? request.reason.rule : undefined
+    if (!input.auto || gate)
       UI.println(
         UI.Style.TEXT_WARNING_BOLD + "!",
         UI.Style.TEXT_NORMAL +
-          `permission requested: ${request.action} (${request.resources.join(", ")}); auto-rejecting`,
+          `permission requested: ${request.action} (${request.resources.join(", ")})` +
+          (gate ? `; the rule ${gate.action} → ${gate.resource} asks for a person; auto-rejecting` : "; auto-rejecting"),
       )
     await input.client.permission
       .reply({
         sessionID: request.sessionID,
         requestID: request.id,
-        decision: input.auto ? "once" : "reject",
-        ...(input.auto ? {} : { message: PERMISSION_REJECTED_FEEDBACK }),
+        decision: input.auto && !gate ? "once" : "reject",
+        ...(input.auto && !gate
+          ? {}
+          : { message: gate ? gatedPermissionFeedback(request.action, gate) : PERMISSION_REJECTED_FEEDBACK }),
       })
       .catch(() => {})
   }

@@ -23,6 +23,30 @@ export const Source = Schema.Union([
 ]).annotate({ identifier: "Permission.Source" })
 export type Source = typeof Source.Type
 
+export const Effect = Schema.Literals(["allow", "deny", "ask"]).annotate({ identifier: "Permission.Effect" })
+export type Effect = typeof Effect.Type
+
+export interface Rule extends Schema.Schema.Type<typeof Rule> {}
+export const Rule = Schema.Struct({
+  action: Schema.String,
+  resource: Schema.String,
+  effect: Effect,
+}).annotate({ identifier: "Permission.Rule" })
+
+export const Ruleset = Schema.Array(Rule).annotate({ identifier: "Permission.Ruleset" })
+export type Ruleset = typeof Ruleset.Type
+
+/**
+ * Why a request asks rather than settles: a rule the user (or an agent's frontmatter) declared, or the catch-all
+ * default that nothing matched. A programmatic approver may answer `default`; `rule` is a gate someone asked for and
+ * belongs to a person, so clients surface it instead of answering it.
+ */
+export const Reason = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("rule"), rule: Rule }),
+  Schema.Struct({ kind: Schema.Literal("default") }),
+]).annotate({ identifier: "Permission.Reason" })
+export type Reason = typeof Reason.Type
+
 const RequestFields = {
   sessionID: SessionID,
   action: Schema.String,
@@ -31,6 +55,8 @@ const RequestFields = {
   metadata: Schema.Record(Schema.String, Schema.Unknown).pipe(optional),
   source: Source.pipe(optional),
   message: Schema.String.pipe(optional),
+  /** Absent from a server older than this field, which asked only through the catch-all default. */
+  reason: Reason.pipe(optional),
 }
 
 export const Request = Schema.Struct({
@@ -52,16 +78,3 @@ const Replied = ephemeral({
   },
 })
 export const Event = { Asked, Replied, Definitions: inventory(Asked, Replied) }
-
-export const Effect = Schema.Literals(["allow", "deny", "ask"]).annotate({ identifier: "Permission.Effect" })
-export type Effect = typeof Effect.Type
-
-export interface Rule extends Schema.Schema.Type<typeof Rule> {}
-export const Rule = Schema.Struct({
-  action: Schema.String,
-  resource: Schema.String,
-  effect: Effect,
-}).annotate({ identifier: "Permission.Rule" })
-
-export const Ruleset = Schema.Array(Rule).annotate({ identifier: "Permission.Ruleset" })
-export type Ruleset = typeof Ruleset.Type

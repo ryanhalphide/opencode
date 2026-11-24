@@ -822,17 +822,6 @@ export type Project = {
   sandboxes: Array<string>
 }
 
-export type PermissionRequest = {
-  id: PermissionID
-  sessionID: SessionID
-  action: string
-  resources: Array<string>
-  save?: Array<string>
-  metadata?: { [x: string]: JsonValue }
-  source?: PermissionSource
-  message?: string
-}
-
 export type PermissionSavedInfo = {
   id: PermissionSavedID
   projectID: ProjectID
@@ -1119,6 +1108,8 @@ export type ModelVariant = {
 }
 
 export type PermissionRuleset = Array<PermissionRule>
+
+export type PermissionReason = { kind: "rule"; rule: PermissionRule } | { kind: "default" }
 
 export type AutomationActionPrompt = { type: "prompt"; prompt: string; to: AutomationTarget }
 
@@ -1843,24 +1834,6 @@ export type ReferenceUpdated = {
   data: {}
 }
 
-export type PermissionAsked = {
-  id: EventID
-  created: number
-  metadata?: { [x: string]: any }
-  type: "permission.asked"
-  location?: LocationRef
-  data: {
-    id: PermissionID
-    sessionID: SessionID
-    action: string
-    resources: Array<string>
-    save?: Array<string>
-    metadata?: { [x: string]: any }
-    source?: PermissionSource
-    message?: string
-  }
-}
-
 export type PermissionReplied = {
   id: EventID
   created: number
@@ -2378,6 +2351,7 @@ export type ModelInfo = {
   variants: Array<ModelVariant>
   time: { released: number }
   cost: Array<ModelCost>
+  costMultipliers?: Array<{ when: { [x: string]: any }; factor: any }>
   status: "alpha" | "beta" | "deprecated" | "active"
   enabled: boolean
   limit: { context: number; input?: number; output: number }
@@ -2653,6 +2627,37 @@ export type ConfigEntry =
       }
     }
   | { type: "directory"; path: AbsolutePath }
+
+export type PermissionRequest = {
+  id: PermissionID
+  sessionID: SessionID
+  action: string
+  resources: Array<string>
+  save?: Array<string>
+  metadata?: { [x: string]: JsonValue }
+  source?: PermissionSource
+  message?: string
+  reason?: PermissionReason
+}
+
+export type PermissionAsked = {
+  id: EventID
+  created: number
+  metadata?: { [x: string]: any }
+  type: "permission.asked"
+  location?: LocationRef
+  data: {
+    id: PermissionID
+    sessionID: SessionID
+    action: string
+    resources: Array<string>
+    save?: Array<string>
+    metadata?: { [x: string]: any }
+    source?: PermissionSource
+    message?: string
+    reason?: PermissionReason
+  }
+}
 
 export type AutomationAction = AutomationActionPrompt | AutomationActionCode
 

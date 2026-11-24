@@ -4,6 +4,7 @@ import {
   OpenCode,
   type EventSubscribeOutput,
   type ExperimentalJobListOutput,
+  type PermissionReplyInput,
   type SessionActiveOutput,
   type SessionInboxListOutput,
   type SessionMessageAssistantTool,
@@ -57,6 +58,21 @@ function settled(outcome: "success" | "interrupted" = "success"): V2Event {
     type: "session.execution.succeeded",
     durable: { aggregateID: "ses_1", seq: 1, version: 1 },
     data: { sessionID: "ses_1" },
+  }
+}
+
+function permissionAsked(request: {
+  id: string
+  action: string
+  resources: string[]
+  reason?: { kind: "rule"; rule: { action: string; resource: string; effect: "allow" | "deny" | "ask" } }
+    | { kind: "default" }
+}): V2Event {
+  return {
+    id: `evt_${request.id}`,
+    created: 1,
+    type: "permission.asked",
+    data: { sessionID: "ses_1", ...request },
   }
 }
 
@@ -269,6 +285,8 @@ async function run(input: {
   active?: () => SessionActiveOutput
   terminalDelay?: number
   signal?: AbortSignal
+  auto?: boolean
+  replies?: PermissionReplyInput[]
 }) {
   const sdk = OpenCode.make({ baseUrl: "https://opencode.test" })
   const values: V2Event[] = [{ id: "evt_connected", type: "server.connected", data: {} }]
@@ -292,6 +310,11 @@ async function run(input: {
   })()
   spyOn(sdk.event, "subscribe").mockImplementation((() => stream) as typeof sdk.event.subscribe)
   spyOn(sdk.permission, "list").mockImplementation(() => ok([]) as never)
+  spyOn(sdk.permission, "reply").mockImplementation(((request: PermissionReplyInput) => {
+    input.replies?.push(request)
+
+    return ok(undefined)
+  }) as never)
   spyOn(sdk.session.form, "list").mockImplementation(
     (request) => ok(input.pendingForms?.filter((item) => item.sessionID === request.sessionID) ?? []) as never,
   )
@@ -338,7 +361,7 @@ async function run(input: {
     files: [],
     thinking: false,
     format: input.format ?? "default",
-    auto: false,
+    auto: input.auto ?? false,
     standalone: input.standalone ?? false,
     signal: input.signal ?? new AbortController().signal,
     renderTool: input.renderTool ?? (() => Promise.resolve()),
@@ -897,5 +920,68 @@ describe("runNonInteractivePrompt", () => {
     controller.abort()
     closed.reject(new ClientError("Transport", { detail: "ECONNRESET" }))
     expect(await output).toMatchObject({ stdout: "", stderr: "", exitCode: 0 })
+  })
+})
+
+describe("non-interactive permission replies", () => {
+  // An agent's frontmatter or the config ruleset asked; --auto may not answer a gate nobody declared for it.
+  test("--auto rejects an ask a rule produced and names the rule", async () => {
+    const replies: PermissionReplyInput[] = []
+    const output = await capture({
+      auto: true,
+      replies,
+      turn: (id) => [
+        prompted(id),
+        permissionAsked({
+          id: "per_gated",
+          action: "shell",
+          resources: ["rm -rf build"],
+          reason: { kind: "rule", rule: { action: "shell", resource: "*", effect: "ask" } },
+        }),
+        settled(),
+      ],
+    })
+
+    expect(replies).toEqual([
+      {
+        sessionID: "ses_1",
+        requestID: "per_gated",
+        decision: "reject",
+        message: expect.stringContaining("the permission rule shell \u2192 *"),
+      },
+    ])
+    expect(output.stderr).toContain("the rule shell \u2192 * asks for a person")
+  })
+
+  test("--auto still approves an ask that fell through to the catch-all default", async () => {
+    const replies: PermissionReplyInput[] = []
+    const output = await capture({
+      auto: true,
+      replies,
+      turn: (id) => [
+        prompted(id),
+        permissionAsked({ id: "per_default", action: "read", resources: ["src/index.ts"], reason: { kind: "default" } }),
+        settled(),
+      ],
+    })
+
+    expect(replies).toEqual([{ sessionID: "ses_1", requestID: "per_default", decision: "once" }])
+    expect(output.stderr).not.toContain("permission requested")
+  })
+
+  test("without --auto an ask is still rejected", async () => {
+    const replies: PermissionReplyInput[] = []
+    await capture({
+      replies,
+      turn: (id) => [
+        prompted(id),
+        permissionAsked({ id: "per_default", action: "read", resources: ["src/index.ts"], reason: { kind: "default" } }),
+        settled(),
+      ],
+    })
+
+    expect(replies).toEqual([
+      { sessionID: "ses_1", requestID: "per_default", decision: "reject", message: expect.any(String) },
+    ])
   })
 })
