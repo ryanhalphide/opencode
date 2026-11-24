@@ -1,10 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import type {
-  SessionMessageAssistant,
-  SessionMessageInfo,
-  SessionMessageUser,
-} from "@opencode/client/promise"
-import { breakdown, contributions, estimate, messageTokens } from "./breakdown"
+import type { SessionMessageAssistant, SessionMessageInfo, SessionMessageUser } from "@opencode/client/promise"
+import { breakdown, bucketItems, contributions, estimate, messageTokens } from "./breakdown"
 
 const user = (id: string, text: string): SessionMessageUser => ({ id, type: "user", text, time: { created: 1 } })
 
@@ -32,7 +28,14 @@ describe("contributions", () => {
       system("msg_s", "x".repeat(40)),
       { id: "msg_y", type: "synthetic", text: "x".repeat(40), time: { created: 1 } },
       { id: "msg_k", type: "skill", skill: "s", name: "n", text: "x".repeat(40), time: { created: 1 } },
-      { id: "msg_c", type: "compaction", status: "completed", reason: "auto", summary: "x".repeat(40), time: { created: 1 } },
+      {
+        id: "msg_c",
+        type: "compaction",
+        status: "completed",
+        reason: "auto",
+        summary: "x".repeat(40),
+        time: { created: 1 },
+      },
     ] satisfies SessionMessageInfo[]) {
       expect(contributions(message)).toEqual([{ source: "system", tokens: 10 }])
     }
@@ -126,5 +129,51 @@ describe("breakdown", () => {
 
   test("messageTokens matches the sum of that message's contributions", () => {
     expect(messageTokens(messages[2])).toBe(50)
+  })
+})
+
+describe("bucketItems", () => {
+  const messages: SessionMessageInfo[] = [
+    system("msg_s", "x".repeat(400)),
+    user("msg_u", "x".repeat(80)),
+    assistant("msg_a", [
+      { type: "text", text: "x".repeat(200) },
+      { type: "reasoning", text: "x".repeat(120) },
+    ]),
+    assistant("msg_b", [{ type: "text", text: "x".repeat(40) }]),
+  ]
+
+  test("a source's items add up to the total its section row shows", () => {
+    const { buckets } = breakdown(messages)
+    const items = bucketItems(messages)
+
+    expect(buckets.length).toBeGreaterThan(0)
+
+    for (const bucket of buckets) {
+      const total = items.get(bucket.source)?.reduce((sum, item) => sum + item.tokens, 0)
+
+      expect(total).toBe(bucket.tokens)
+    }
+  })
+
+  test("lists every contributing message once, in transcript order", () => {
+    const items = bucketItems(messages)
+
+    expect(items.get("assistant")?.map((item) => item.id)).toEqual(["msg_a", "msg_b"])
+    expect(items.get("assistant")?.map((item) => item.tokens)).toEqual([50, 10])
+    expect(items.get("system")?.map((item) => item.id)).toEqual(["msg_s"])
+    expect(items.get("reasoning")?.map((item) => item.id)).toEqual(["msg_a"])
+  })
+
+  test("a source no message touched yields no items, so its row cannot open", () => {
+    const items = bucketItems(messages)
+
+    expect(items.get("results")).toBeUndefined()
+    expect(items.get("shell")).toBeUndefined()
+
+    const idle: SessionMessageInfo[] = [{ id: "msg_i", type: "idle", outcome: "succeeded", time: { created: 1 } }]
+
+    expect(breakdown(idle).buckets).toEqual([])
+    expect(bucketItems(idle).size).toBe(0)
   })
 })

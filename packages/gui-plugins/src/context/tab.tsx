@@ -15,7 +15,7 @@ import type { SessionMessageInfo } from "@opencode/client/promise"
 import { lastAssistantWithUsage } from "@opencode/client/solid"
 import { createKeyed, usePlugin, type MountedSession } from "@opencode/plugin/gui"
 import { catalogModel, syncCatalog } from "./catalog"
-import { breakdown, messageTokens, type ContextSource } from "./breakdown"
+import { breakdown, bucketItems, messageTokens, type Bucket, type ContextSource } from "./breakdown"
 import { fetchSessionExport, sessionExportFilename } from "./export"
 import { createSessionContextFormatter } from "./format"
 import {
@@ -50,9 +50,7 @@ function RawMessageContent(props: { message: SessionMessageInfo; onRendered: () 
     }
   })
 
-  return (
-    <File mode="text" file={file()} overflow="wrap" class="select-text" onRendered={props.onRendered} />
-  )
+  return <File mode="text" file={file()} overflow="wrap" class="select-text" onRendered={props.onRendered} />
 }
 
 function RawMessage(props: {
@@ -150,8 +148,14 @@ export default function SessionContextTab(props: { session: MountedSession }) {
   // What is filling the window, by source, derived from the same list the stats read.
   const sources = createMemo(() => breakdown(messages()))
 
+  // The same messages behind each source, so an opened section lists exactly what the total counted.
+  const items = createMemo(() => bucketItems(messages()))
+
   // Picking a source narrows the raw-message list to the messages that contributed to it.
   const [source, setSource] = createSignal<ContextSource>()
+
+  /** The items a section row expands into; empty means the row has nothing to disclose. */
+  const sectionItems = (bucket: Bucket) => items().get(bucket.source) ?? []
 
   const shownMessages = createMemo(() => {
     const picked = source()
@@ -420,10 +424,7 @@ export default function SessionContextTab(props: { session: MountedSession }) {
   )
 
   // New messages grow the content, so a restore clamped by shorter content can now reach its offset.
-  createKeyed(
-    createMemo(on(messages, (list) => list, { defer: true })),
-    () => dispatchScroll(contentChanged),
-  )
+  createKeyed(createMemo(on(messages, (list) => list, { defer: true })), () => dispatchScroll(contentChanged))
 
   // Writes the offset the save frame has not stored yet.
   onCleanup(() => dispatchScroll({ type: "disposed" }))
@@ -479,38 +480,74 @@ export default function SessionContextTab(props: { session: MountedSession }) {
 
             <div class="flex flex-col">
               <For each={sources().buckets}>
-                {(bucket, index) => (
-                  <button
-                    type="button"
-                    aria-pressed={source() === bucket.source}
-                    class={`group flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-12-regular ${
-                      source() === bucket.source ? "bg-v2-background-bg-layer-04" : "hover:bg-v2-background-bg-layer-04"
-                    }`}
-                    onClick={() => setSource(source() === bucket.source ? undefined : bucket.source)}
-                  >
-                    <span
-                      class="size-2 shrink-0 rounded-full"
-                      style={{ background: "var(--v2-icon-icon-base)", opacity: tone(index()) }}
-                    />
-                    <span
-                      class={`truncate ${source() === bucket.source ? "text-text-strong" : "text-text-weak"}`}
-                    >
-                      {ctx.t(`breakdown.${bucket.source}`)}
-                    </span>
-                    <span class="ml-auto shrink-0 tabular-nums text-text-strong">
-                      {formatter().number(bucket.tokens)}
-                    </span>
-                    <span class="w-10 shrink-0 text-right tabular-nums text-text-weak">
-                      {formatter().percent(percentOfWindow(bucket.tokens))}
-                    </span>
-                    <Icon
-                      name="chevron-down"
-                      class={`size-3 shrink-0 text-text-weak transition-transform ${
-                        source() === bucket.source ? "rotate-180" : ""
-                      }`}
-                    />
-                  </button>
-                )}
+                {(bucket, index) => {
+                  const list = () => sectionItems(bucket)
+                  const expanded = () => source() === bucket.source
+                  const disclosable = () => list().length > 0
+
+                  return (
+                    <div class="flex flex-col" data-slot="context-section" data-source={bucket.source}>
+                      <button
+                        type="button"
+                        aria-expanded={expanded()}
+                        disabled={!disclosable()}
+                        class={`group flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-12-regular disabled:cursor-default ${
+                          expanded()
+                            ? "bg-v2-background-bg-layer-04"
+                            : disclosable()
+                              ? "hover:bg-v2-background-bg-layer-04"
+                              : ""
+                        }`}
+                        onClick={() => setSource(expanded() ? undefined : bucket.source)}
+                      >
+                        <span
+                          class="size-2 shrink-0 rounded-full"
+                          style={{ background: "var(--v2-icon-icon-base)", opacity: tone(index()) }}
+                        />
+                        <span class={`truncate ${expanded() ? "text-text-strong" : "text-text-weak"}`}>
+                          {ctx.t(`breakdown.${bucket.source}`)}
+                        </span>
+                        <span class="ml-auto shrink-0 tabular-nums text-text-strong">
+                          {formatter().number(bucket.tokens)}
+                        </span>
+                        <span class="w-10 shrink-0 text-right tabular-nums text-text-weak">
+                          {formatter().percent(percentOfWindow(bucket.tokens))}
+                        </span>
+                        <Show when={disclosable()}>
+                          <Icon
+                            name="chevron-down"
+                            class={`size-3 shrink-0 text-text-weak transition-transform ${
+                              expanded() ? "rotate-180" : ""
+                            }`}
+                          />
+                        </Show>
+                      </button>
+                      <Show when={expanded() && disclosable()}>
+                        <ul
+                          class="flex flex-col gap-1 pb-2 pl-6 pr-2 pt-1"
+                          data-slot="context-section-items"
+                          aria-label={ctx.t(`breakdown.${bucket.source}`)}
+                        >
+                          <For each={list()}>
+                            {(item) => (
+                              <li class="flex items-center gap-2 text-12-regular">
+                                <span class="min-w-0 truncate text-text-weak">
+                                  {item.type} <span class="text-text-base">• {item.id}</span>
+                                </span>
+                                <span class="ml-auto shrink-0 tabular-nums text-text-weak">
+                                  {messageTokensLabel(item.tokens)}
+                                </span>
+                                <span class="w-10 shrink-0 text-right tabular-nums text-text-weak">
+                                  {formatter().percent(percentOfWindow(item.tokens))}
+                                </span>
+                              </li>
+                            )}
+                          </For>
+                        </ul>
+                      </Show>
+                    </div>
+                  )
+                }}
               </For>
             </div>
 

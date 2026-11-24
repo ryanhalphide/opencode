@@ -41,6 +41,13 @@ export type Breakdown = {
 /** One message's contribution to one source. */
 export type Contribution = { source: ContextSource; tokens: number }
 
+/** One message's share of one source, for the list a section row expands into. */
+export type BucketItem = {
+  id: string
+  type: SessionMessageInfo["type"]
+  tokens: number
+}
+
 /**
  * Character-derived token estimate. Mirrors `CHARS_PER_TOKEN` in
  * `packages/core/src/util/token.ts`: a GUI plugin may not import Core (client
@@ -129,6 +136,34 @@ export function breakdown(messages: readonly SessionMessageInfo[]): Breakdown {
     .sort((left, right) => right.tokens - left.tokens)
 
   return { buckets, estimated: buckets.reduce((sum, bucket) => sum + bucket.tokens, 0) }
+}
+
+/**
+ * The items behind every source, in transcript order, each with what it added to that source.
+ * Derived from `contributions`, like `breakdown`, so a source's items always add up to the total
+ * its section row shows and a section with nothing behind it yields no items.
+ */
+export function bucketItems(messages: readonly SessionMessageInfo[]): Map<ContextSource, BucketItem[]> {
+  const items = new Map<ContextSource, BucketItem[]>()
+
+  for (const message of messages) {
+    const perSource = new Map<ContextSource, number>()
+
+    for (const contribution of contributions(message)) {
+      if (contribution.tokens <= 0) continue
+
+      perSource.set(contribution.source, (perSource.get(contribution.source) ?? 0) + contribution.tokens)
+    }
+
+    for (const [source, tokens] of perSource) {
+      const list = items.get(source) ?? []
+
+      list.push({ id: message.id, type: message.type, tokens })
+      items.set(source, list)
+    }
+  }
+
+  return items
 }
 
 function attachment(file: NonNullable<Extract<SessionMessageInfo, { type: "user" }>["files"]>[number]) {
