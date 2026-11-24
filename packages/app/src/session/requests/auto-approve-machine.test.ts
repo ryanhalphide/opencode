@@ -22,6 +22,16 @@ const approve = (runId: string): AutoApproveEvent => ({
   sessionID: "ses_1",
   projectID: "proj_1",
   runId,
+  strict: false,
+})
+
+// An ask the agent's own rules declared: only the user may grant it.
+const strictApprove = (runId: string): AutoApproveEvent => ({
+  type: "approve",
+  sessionID: "ses_1",
+  projectID: "proj_1",
+  runId,
+  strict: true,
 })
 
 const replying = (runId: string, attempt: number): AutoApproveState => ({
@@ -49,6 +59,8 @@ const reply = (runId: string, attempt: number): AutoApproveEffect => ({
 })
 
 const gaveUp: AutoApproveState = { status: "gave-up", projectID: "proj_1" }
+
+const needsUserState: AutoApproveState = { status: "needs-user" }
 
 function replay(events: AutoApproveEvent[], from = INITIAL_AUTO_APPROVE_STATE) {
   return events.reduce<AutoApproveTransition[]>((steps, event) => {
@@ -131,6 +143,25 @@ describe("transitionAutoApprove", () => {
     expect(needsUser(steps.at(-1)!.state, true)).toBe(true)
   })
 
+  // A declared ask is the user's decision, so the cycle settles into the dock instead of answering it.
+  test("a declared ask emits no reply and waits for the user even with auto-approve on", () => {
+    const result = transitionAutoApprove(INITIAL_AUTO_APPROVE_STATE, strictApprove("r1"))
+
+    expect(result.state).toEqual(needsUserState)
+    expect(result.effects).toEqual([])
+    expect(needsUser(result.state, true)).toBe(true)
+    // It is a settled cycle: a repeated approval cannot start replying for it.
+    expect(transitionAutoApprove(result.state, approve("r2"))).toEqual({ state: needsUserState, effects: [] })
+  })
+
+  test("an ordinary ask is still auto-approved", () => {
+    const result = transitionAutoApprove(INITIAL_AUTO_APPROVE_STATE, approve("r1"))
+
+    expect(result.state).toEqual(replying("r1", 0))
+    expect(result.effects).toEqual([reply("r1", 0)])
+    expect(needsUser(result.state, true)).toBe(false)
+  })
+
   test("recovers on a later attempt", () => {
     const state = replay([
       approve("r1"),
@@ -146,6 +177,7 @@ describe("transitionAutoApprove", () => {
     { name: "replying", from: replying("r1", 0) },
     { name: "waiting for a retry", from: waiting("r1", 1) },
     { name: "exhausted", from: gaveUp },
+    { name: "waiting on the user", from: needsUserState },
     { name: "replied", from: { status: "replied" } },
   ])("ignores another approval while $name", (input) => {
     const result = transitionAutoApprove(input.from, approve("r2"))
@@ -206,6 +238,12 @@ describe("transitionAutoApprove", () => {
       effects: [{ type: "cancel-retry" }],
     },
     { from: gaveUp, cancel: INITIAL_AUTO_APPROVE_STATE, resolved: { status: "replied" }, effects: [] },
+    {
+      from: needsUserState,
+      cancel: INITIAL_AUTO_APPROVE_STATE,
+      resolved: { status: "replied" },
+      effects: [],
+    },
     { from: { status: "replied" }, cancel: { status: "replied" }, resolved: { status: "replied" }, effects: [] },
   ])("cancel and resolved from $from.status", (input) => {
     expect(transitionAutoApprove(input.from, { type: "cancel" })).toEqual({
@@ -224,6 +262,7 @@ test.each<{ state: AutoApproveState; on: boolean; off: boolean }>([
   { state: replying("r1", 0), on: false, off: true },
   { state: waiting("r1", 1), on: false, off: true },
   { state: gaveUp, on: true, off: true },
+  { state: needsUserState, on: true, off: true },
   { state: { status: "replied" }, on: false, off: false },
 ])("needsUser for $state.status", (input) => {
   expect(needsUser(input.state, true)).toBe(input.on)

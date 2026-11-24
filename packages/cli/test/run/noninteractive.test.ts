@@ -32,6 +32,21 @@ function formCreated(info: FormInfo, eventLocation = location): V2Event {
   return { id: `evt_${info.id}`, created: 0, type: "form.created", location: eventLocation, data: { form: info } }
 }
 
+function permissionAsked(id: string, strict?: boolean): V2Event {
+  return {
+    id: `evt_${id}`,
+    created: 0,
+    type: "permission.asked",
+    data: {
+      id,
+      sessionID: "ses_1",
+      action: "shell",
+      resources: ["rm -rf /"],
+      ...(strict === undefined ? {} : { strict }),
+    },
+  }
+}
+
 function prompted(inboxID: string): V2Event {
   return {
     id: "evt_prompted",
@@ -269,6 +284,8 @@ async function run(input: {
   active?: () => SessionActiveOutput
   terminalDelay?: number
   signal?: AbortSignal
+  auto?: boolean
+  replies?: { sessionID: string; requestID: string; decision: string; message?: string }[]
 }) {
   const sdk = OpenCode.make({ baseUrl: "https://opencode.test" })
   const values: V2Event[] = [{ id: "evt_connected", type: "server.connected", data: {} }]
@@ -292,6 +309,10 @@ async function run(input: {
   })()
   spyOn(sdk.event, "subscribe").mockImplementation((() => stream) as typeof sdk.event.subscribe)
   spyOn(sdk.permission, "list").mockImplementation(() => ok([]) as never)
+  spyOn(sdk.permission, "reply").mockImplementation((request) => {
+    input.replies?.push(request as never)
+    return ok(undefined) as never
+  })
   spyOn(sdk.session.form, "list").mockImplementation(
     (request) => ok(input.pendingForms?.filter((item) => item.sessionID === request.sessionID) ?? []) as never,
   )
@@ -338,7 +359,7 @@ async function run(input: {
     files: [],
     thinking: false,
     format: input.format ?? "default",
-    auto: false,
+    auto: input.auto ?? false,
     standalone: input.standalone ?? false,
     signal: input.signal ?? new AbortController().signal,
     renderTool: input.renderTool ?? (() => Promise.resolve()),
@@ -897,5 +918,57 @@ describe("runNonInteractivePrompt", () => {
     controller.abort()
     closed.reject(new ClientError("Transport", { detail: "ECONNRESET" }))
     expect(await output).toMatchObject({ stdout: "", stderr: "", exitCode: 0 })
+  })
+})
+
+// A declared ask is a rule the agent's own configuration reserves for the user, so a run that answers requests on
+// the user's behalf must not grant it while keeping the answers it gives for every other ask.
+describe("runNonInteractivePrompt permission replies", () => {
+  async function prompt(
+    input: { auto: boolean; strict?: boolean },
+    replies: { sessionID: string; requestID: string; decision: string; message?: string }[],
+  ) {
+    const warnings: string[] = []
+    const write = spyOn(process.stderr, "write").mockImplementation((chunk) => {
+      warnings.push(String(chunk))
+      return true
+    })
+    try {
+      await run({
+        auto: input.auto,
+        replies,
+        turn: (messageID) => [permissionAsked("per_ask", input.strict), prompted(messageID), settled()],
+      })
+    } finally {
+      write.mockRestore()
+    }
+    expect(replies).toHaveLength(1)
+    return { reply: replies[0]!, stderr: warnings.join("") }
+  }
+
+  test("rejects a declared ask even under --auto, naming the action and resources", async () => {
+    const { reply, stderr } = await prompt({ auto: true, strict: true }, [])
+
+    expect(reply).toMatchObject({ sessionID: "ses_1", requestID: "per_ask", decision: "reject" })
+    expect(reply.message).toContain("shell: rm -rf /")
+    expect(reply.message).toContain("only the user may approve it, in an interactive session")
+    expect(stderr).toContain("permission requested: shell (rm -rf /)")
+    expect(stderr).toContain("must be approved in an interactive session")
+  })
+
+  test("still approves an ordinary ask under --auto", async () => {
+    const { reply, stderr } = await prompt({ auto: true, strict: false }, [])
+
+    expect(reply).toMatchObject({ sessionID: "ses_1", requestID: "per_ask", decision: "once" })
+    expect(reply.message).toBeUndefined()
+    expect(stderr).toBe("")
+  })
+
+  test("rejects any ask without --auto", async () => {
+    const { reply, stderr } = await prompt({ auto: false }, [])
+
+    expect(reply).toMatchObject({ sessionID: "ses_1", requestID: "per_ask", decision: "reject" })
+    expect(reply.message).toContain("cannot ask the user for permission")
+    expect(stderr).toContain("permission requested: shell (rm -rf /); auto-rejecting")
   })
 })

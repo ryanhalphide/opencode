@@ -114,6 +114,31 @@ describe("Permission", () => {
     }),
   )
 
+  // An ask a rule declares is a decision someone wrote down, so a client that answers requests on the user's behalf
+  // must be able to tell it from the catch-all default.
+  it.effect("marks an ask a declared rule produced as strict and leaves a default ask unmarked", () =>
+    Effect.gen(function* () {
+      yield* setup([
+        { action: "read", resource: "config/*", effect: "ask" },
+        { action: "read", resource: "src/*", effect: "allow" },
+      ])
+      const declared = yield* waitForRequest({ id: Permission.ID.create("per_declared"), resources: ["config/a.json"] })
+      expect(declared.request.strict).toBe(true)
+      expect(yield* Schema.encodeEffect(Schema.toCodecJson(Permission.Request))(declared.request)).toMatchObject({
+        strict: true,
+      })
+
+      const fallback = yield* waitForRequest({ id: Permission.ID.create("per_default"), resources: ["docs/a.md"] })
+      expect(fallback.request).not.toHaveProperty("strict")
+
+      // A configured deny still settles the request before any ask is recorded.
+      yield* setRules([{ action: "read", resource: "config/*", effect: "deny" }])
+      expect(yield* declared.service.ask(assertion({ resources: ["config/a.json"] }))).toMatchObject({
+        effect: "deny",
+      })
+    }),
+  )
+
   it.effect("evaluates against an explicit agent", () =>
     Effect.gen(function* () {
       yield* setup([{ action: "read", resource: "*", effect: "allow" }])
